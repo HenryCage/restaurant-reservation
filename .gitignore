@@ -1,0 +1,47 @@
+# ============================================================
+# Secrets — NEVER commit. Only the *.example files are tracked.
+# ============================================================
+
+# Shared environment / secrets
+.env
+.env.*
+!.env.example
+
+# Tenant registry (real client list + sheetIds) — confidential business data
+tenants.json
+!tenants.example.json
+
+# Google Cloud service-account keys & private keys
+# (the downloaded SA JSON must never live in the repo)
+*.pem
+*.p12
+*service-account*.json
+gcp-key*.json
+credentials*.json
+
+# ============================================================
+# Node / build
+# ============================================================
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ============================================================
+# Logs
+# ============================================================
+logs/
+*.log
+
+# ============================================================
+# OS / editor cruft
+# ============================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,24 @@
+{
+  "name": "sms-dispatch-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Multi-tenant Google Sheets -> SMS dispatch service (Nigerian delivery notifications).",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "googleapis": "^173.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}
