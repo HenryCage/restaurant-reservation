@@ -18,6 +18,28 @@ tenants.json
 *service-account*.json
 gcp-key*.json
 credentials*.json
+# GCP console's default download name is <project-id>-<12 hex chars>.json,
+# which doesn't match the patterns above -- catch that shape generically...
+*-????????????.json
+# ...and the specific key currently sitting in this working copy.
+sms-logistics-demo-45a31aed177f.json
+
+# ============================================================
+# Local SQLite data (Foundation merge sub-project — spec:
+# docs/superpowers/specs/2026-07-16-foundation-merge-design.md)
+# ============================================================
+data/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# ============================================================
+# Reference material dumped in the repo for analysis, not project source
+# ============================================================
+sms-automation-main.zip
 
 # ============================================================
 # Node / build
