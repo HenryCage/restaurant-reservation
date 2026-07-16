@@ -189,6 +189,130 @@ describe('processor — transient vs permanent failure', () => {
   });
 });
 
+describe('processor — onNotified hook', () => {
+  it('calls onNotified with (tenant, {name, phone}) on a successful send', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms();
+    const calls = [];
+    const onNotified = (tenant, contact) => calls.push({ tenant, contact });
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      onNotified,
+      now: FIXED_NOW,
+    });
+
+    await processor.run();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].tenant.id).toBe('a');
+    expect(calls[0].contact).toEqual({ name: 'Chidi', phone: '+2348012345678' });
+  });
+
+  it('is not called on a transient failure', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms(() => ({ ok: false, permanent: false, error: 'network down' }));
+    let callCount = 0;
+    const onNotified = () => callCount++;
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      onNotified,
+      now: FIXED_NOW,
+    });
+
+    await processor.run();
+    expect(callCount).toBe(0);
+  });
+
+  it('is not called on a permanent failure', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms(() => ({ ok: false, permanent: true, error: 'invalid sender id' }));
+    let callCount = 0;
+    const onNotified = () => callCount++;
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      onNotified,
+      now: FIXED_NOW,
+    });
+
+    await processor.run();
+    expect(callCount).toBe(0);
+  });
+
+  it('is not called during DRY_RUN', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms();
+    let callCount = 0;
+    const onNotified = () => callCount++;
+    const processor = createProcessor({
+      config: baseConfig({ dryRun: true }),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      onNotified,
+      now: FIXED_NOW,
+    });
+
+    await processor.run();
+    expect(callCount).toBe(0);
+  });
+
+  it('a throwing onNotified does not fail the row (write-back and summary still happen)', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms();
+    const onNotified = () => {
+      throw new Error('contacts db is down');
+    };
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      onNotified,
+      now: FIXED_NOW,
+    });
+
+    const { summaries } = await processor.run();
+    expect(summaries[0].sentOk).toBe(1);
+    expect(sheets.writes).toHaveLength(1);
+    expect(sheets.writes[0].fields.lastNotifiedStatus).toBe('out for delivery');
+  });
+
+  it('omitting onNotified entirely leaves behavior unchanged', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms();
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      sendSms,
+      now: FIXED_NOW,
+    });
+
+    const { summaries } = await processor.run();
+    expect(summaries[0].sentOk).toBe(1);
+  });
+});
+
 describe('processor — guardrails & robustness', () => {
   it('caps sends per tenant per tick and defers the rest', async () => {
     const tenants = buildTenants([rawTenant()]);

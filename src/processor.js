@@ -27,12 +27,13 @@ import { maskPhone } from './logger.js';
  *     writeRow: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string,number>, fields: object) => Promise<void>,
  *   },
  *   sendSms: (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }>,
+ *   onNotified?: (tenant: import('./tenants.js').Tenant, contact: { name: string, phone: string }) => void,
  *   now?: () => Date,
  *   sleep?: (ms: number) => Promise<void>,
  * }} deps
  */
 export function createProcessor(deps) {
-  const { config, logger, registry, sheets, sendSms } = deps;
+  const { config, logger, registry, sheets, sendSms, onNotified } = deps;
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? ((ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()));
 
@@ -170,6 +171,21 @@ export function createProcessor(deps) {
         status: row.status,
         providerMessageId: result.providerMessageId,
       });
+
+      // Optional, additive extension point (Foundation merge spec's "Sheet ->
+      // contacts sync"): only on a real successful send, never during a dry
+      // run, and isolated so a hook failure can never turn a successful
+      // notification into a failed tick.
+      if (onNotified && !config.dryRun) {
+        try {
+          onNotified(tenant, { name: row.name, phone: e164 });
+        } catch (err) {
+          log.error('onNotified hook failed (isolated)', {
+            orderId: row.orderId,
+            error: err?.message ?? String(err),
+          });
+        }
+      }
       return;
     }
 
