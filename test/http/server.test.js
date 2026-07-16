@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { startTestServer } from './helpers/testServer.js';
 
-const FIXTURE_DIST_PATH = fileURLToPath(new URL('./fixtures/dist', import.meta.url));
+const FIXTURE_DIST_PATH = fileURLToPath(new URL('./fixtures/client-dist-fixture', import.meta.url));
 
 let ctx;
 afterEach(async () => {
