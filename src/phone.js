@@ -52,30 +52,34 @@ export function normalisePhone(raw, countryCode = '234') {
   }
 
   const e164 = '+' + national;
-  return isValidE164(e164, cc) ? e164 : null;
+  return isValidE164(e164) ? e164 : null;
 }
 
 /**
  * Validate a canonical E.164 string.
  *
- * For Nigeria (country code 234) we enforce the real mobile shape:
- * "+234" followed by a 10-digit national number starting 7/8/9. This rejects
+ * For a Nigerian number (+234) we enforce the real mobile shape: "+234"
+ * followed by a 10-digit national number starting 7/8/9. This rejects
  * landline/invalid prefixes that would silently waste paid (DND-route) sends.
  *
- * For any other country code we fall back to a generic E.164 length check
- * (8–15 total digits) anchored on the expected country code.
+ * For any other country we fall back to a generic E.164 length check (8-15
+ * total digits) -- this is judged purely from the number's own embedded "+"
+ * prefix, never against a caller-supplied default. A number that already
+ * declares its own country via "+" (e.g. a Lithuanian "+370..." row in a
+ * tenant's sheet, or a contact entered against a different selected country)
+ * must not be rejected just because it doesn't match some unrelated default
+ * country code -- that was a real bug: a "+"-prefixed number from any
+ * country other than the default was silently treated as invalid.
  *
  * @param {string} e164
- * @param {string} countryCode - digits only.
  * @returns {boolean}
  */
-export function isValidE164(e164, countryCode = '234') {
-  if (typeof e164 !== 'string' || !e164.startsWith('+' + countryCode)) return false;
+export function isValidE164(e164) {
+  if (typeof e164 !== 'string' || !e164.startsWith('+')) return false;
 
-  if (countryCode === '234') {
+  if (e164.startsWith('+234')) {
     return /^\+234[789]\d{9}$/.test(e164);
   }
 
-  // Generic E.164: "+" then 8..15 digits total, starting with the country code.
   return /^\+\d{8,15}$/.test(e164);
 }

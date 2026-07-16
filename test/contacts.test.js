@@ -43,13 +43,18 @@ describe('createContactsStore', () => {
       expect(c.phone).toBe('+37060012345');
     });
 
-    it('validates a "+"-prefixed number against the overridden countryCode, not the default', () => {
+    it('accepts a "+"-prefixed number regardless of countryCode -- its own prefix is trusted', () => {
+      // phone.js's isValidE164 judges a "+"-prefixed number purely by its own
+      // embedded country, never against any default/override -- so this
+      // passes identically whether countryCode is given, omitted, or even
+      // set to something else entirely (a stale/wrong selection in the UI
+      // can't make an otherwise-valid international number get rejected).
       const store = makeStore();
-      // Without the override this would be rejected: isValidE164 checks the
-      // number starts with "+234" by default, not whatever country the "+"
-      // number actually claims to be from.
-      const c = store.createContact('t1', { name: 'Rimas', phone: '+37060012345', countryCode: '370' });
-      expect(c.phone).toBe('+37060012345');
+      const withOverride = store.createContact('t1', { name: 'Rimas', phone: '+37060012345', countryCode: '370' });
+      expect(withOverride.phone).toBe('+37060012345');
+
+      const withoutOverride = store.createContact('t2', { name: 'Rimas 2', phone: '+37060012345' });
+      expect(withoutOverride.phone).toBe('+37060012345');
     });
 
     it('falls back to the store default when countryCode is omitted', () => {

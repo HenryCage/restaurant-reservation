@@ -55,17 +55,39 @@ describe('normalisePhone (generic country code)', () => {
   it('still rejects clearly-too-short generic numbers', () => {
     expect(normalisePhone('123', '1')).toBeNull();
   });
+
+  it('trusts a "+"-prefixed number\'s own embedded country over an unrelated default (regression)', () => {
+    // Real bug: a sheet row (or contact) with a Lithuanian "+370..." number
+    // was silently rejected as "invalid phone" when the tenant/store default
+    // country code was Nigeria's "234" -- the "+" already unambiguously says
+    // which country this is, so it must not be judged against the default.
+    expect(normalisePhone('+37060012345', '234')).toBe('+37060012345');
+    expect(normalisePhone('+37060012345')).toBe('+37060012345'); // default cc irrelevant here too
+  });
 });
 
 describe('isValidE164', () => {
-  it('enforces the Nigerian mobile shape', () => {
-    expect(isValidE164('+2348012345678', '234')).toBe(true);
-    expect(isValidE164('+2346012345678', '234')).toBe(false);
-    expect(isValidE164('+234801234567', '234')).toBe(false); // 9 NSN digits
+  it('enforces the Nigerian mobile shape for a +234 number', () => {
+    expect(isValidE164('+2348012345678')).toBe(true);
+    expect(isValidE164('+2346012345678')).toBe(false); // landline-ish prefix 6
+    expect(isValidE164('+234801234567')).toBe(false); // 9 NSN digits
   });
 
-  it('rejects strings not starting with the country code', () => {
-    expect(isValidE164('2348012345678', '234')).toBe(false); // missing +
-    expect(isValidE164('+1555123456', '234')).toBe(false);
+  it('rejects a string missing the leading "+"', () => {
+    expect(isValidE164('2348012345678')).toBe(false);
+  });
+
+  it('accepts a non-Nigerian number purely from its own "+" prefix, not against any default', () => {
+    // This is the fix for a real bug: a "+"-prefixed number from any country
+    // other than Nigeria used to be rejected outright because validation
+    // gated on a caller-supplied default country code instead of trusting
+    // the number's own embedded country.
+    expect(isValidE164('+1555123456')).toBe(true);
+    expect(isValidE164('+37060012345')).toBe(true); // Lithuania
+  });
+
+  it('still rejects a generically too-short or too-long number', () => {
+    expect(isValidE164('+123')).toBe(false);
+    expect(isValidE164('+1234567890123456')).toBe(false); // 16 digits
   });
 });
