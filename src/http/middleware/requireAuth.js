@@ -28,6 +28,7 @@ export function createRequireAuth({ authStore, exemptPaths = [] }) {
     }
 
     req.authUser = { id: user.id, tenantId: user.tenantId, isSuperadmin: user.isSuperadmin };
+    req.sessionId = sid;
     next();
   };
 }
