@@ -78,7 +78,7 @@ function DashboardScreen({ api, onLogout, onBackToTenants }) {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-6">
                 <CampaignForm api={api} contacts={contacts} onCreated={fetchStats} />
-                <CampaignHistory api={api} />
+                <CampaignHistory api={api} contacts={contacts} />
               </div>
               <div className="space-y-6">
                 <ContactsPanel api={api} />

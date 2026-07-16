@@ -10,10 +10,20 @@ const STATUS_STYLES = {
 const DEFAULT_STATUS_STYLE = 'bg-blue-100 text-blue-800'; // pending / processing
 
 /**
- * @param {{ api: ReturnType<typeof import('../api.js').createApiClient> }} props
+ * @param {{
+ *   api: ReturnType<typeof import('../api.js').createApiClient>,
+ *   contacts?: { id: string, name: string }[],
+ * }} props
  */
-function CampaignHistory({ api }) {
+function CampaignHistory({ api, contacts = [] }) {
   const [campaigns, setCampaigns] = useState([]);
+
+  /** sendTo is either "all" or a contact id -- resolve the id to a name for display. */
+  function sendToLabel(sendTo) {
+    if (sendTo === 'all') return 'All contacts';
+    const contact = contacts.find((c) => c.id === sendTo);
+    return contact ? contact.name : 'Unknown contact';
+  }
 
   const fetchCampaigns = useCallback(async () => {
     try {
@@ -52,7 +62,7 @@ function CampaignHistory({ api }) {
               {campaigns.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50/50">
                   <td className="py-3 font-semibold text-slate-900">{c.name}</td>
-                  <td className="py-3 text-slate-500">{c.sendTo === 'all' ? 'All contacts' : c.sendTo}</td>
+                  <td className="py-3 text-slate-500">{sendToLabel(c.sendTo)}</td>
                   <td className="py-3 text-slate-500">{new Date(c.scheduledTime).toLocaleString()}</td>
                   <td className="py-3">
                     <span
