@@ -13,6 +13,7 @@ import { createContactsRoutes } from './routes/contacts.js';
 import { createCampaignsRoutes } from './routes/campaigns.js';
 import { createOrdersRoutes } from './routes/orders.js';
 import { createTenantsRoutes } from './routes/tenants.js';
+import { createUsersRoutes } from './routes/users.js';
 import { createRateLimiter } from './rateLimiter.js';
 import { createRequireAuth } from './middleware/requireAuth.js';
 import { createRequireSuperadmin } from './middleware/requireSuperadmin.js';
@@ -63,6 +64,7 @@ export function createHttpServer({
 
   const requireSuperadmin = createRequireSuperadmin({ authStore });
   app.use('/api/tenants', createTenantsRoutes({ requireSuperadmin, registry }));
+  app.use('/api/users', createUsersRoutes({ requireSuperadmin, authStore, registry }));
 
   if (config.isProduction) {
     app.use(express.static(clientDistPath));
