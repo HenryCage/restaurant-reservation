@@ -15,6 +15,8 @@ import { createDb } from './db.js';
 import { createContactsStore } from './contacts.js';
 import { createCampaignsStore } from './campaigns.js';
 import { createCampaignScheduler } from './campaignScheduler.js';
+import { createAuthStore } from './auth.js';
+import { createHttpServer } from './http/server.js';
 
 function main() {
   const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
@@ -61,6 +63,9 @@ function main() {
   const processor = createProcessor({ config, logger, registry, sheets, sendSms, onNotified });
   const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, sendSms });
 
+  const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
+  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore });
+
   // Fail loudly and exit so a supervisor can restart from a clean state.
   process.on('unhandledRejection', (reason) => {
     logger.error('unhandledRejection — exiting for supervisor restart', {
@@ -94,10 +99,15 @@ function main() {
   campaignTick(); // run immediately, then on its own interval
   const campaignTimer = setInterval(campaignTick, config.campaignTickIntervalMs);
 
+  const listener = httpServer.listen(config.httpPort, () => {
+    logger.info(`HTTP API listening on port ${config.httpPort}`);
+  });
+
   const shutdown = (signal) => {
     logger.info(`received ${signal}, shutting down`);
     clearInterval(timer);
     clearInterval(campaignTimer);
+    listener.close();
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

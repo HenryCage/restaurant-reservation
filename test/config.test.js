@@ -27,6 +27,11 @@ describe('loadConfig — happy path', () => {
     expect(cfg.dbPath).toBe('data/platform.db');
     expect(cfg.campaignTickIntervalMs).toBe(10000);
     expect(cfg.maxCampaignRecipientsPerTick).toBe(50);
+    expect(cfg.httpPort).toBe(3000);
+    expect(cfg.sessionTtlHours).toBe(168);
+    expect(cfg.corsOrigin).toBe('');
+    expect(cfg.loginRateLimitMax).toBe(10);
+    expect(cfg.loginRateLimitWindowMinutes).toBe(15);
   });
 
   it('un-escapes the \\n sequences in the private key', () => {

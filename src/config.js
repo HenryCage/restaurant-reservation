@@ -115,6 +115,13 @@ export function loadConfig(env = process.env) {
   const campaignTickIntervalMs = parseIntEnv(env, 'CAMPAIGN_TICK_INTERVAL_MS', 10000, errors);
   const maxCampaignRecipientsPerTick = parseIntEnv(env, 'MAX_CAMPAIGN_RECIPIENTS_PER_TICK', 50, errors);
 
+  // Customer-facing auth + HTTP API additions.
+  const httpPort = parseIntEnv(env, 'HTTP_PORT', 3000, errors);
+  const sessionTtlHours = parseIntEnv(env, 'SESSION_TTL_HOURS', 168, errors);
+  const corsOrigin = (env.CORS_ORIGIN ?? '').trim();
+  const loginRateLimitMax = parseIntEnv(env, 'LOGIN_RATE_LIMIT_MAX', 10, errors);
+  const loginRateLimitWindowMinutes = parseIntEnv(env, 'LOGIN_RATE_LIMIT_WINDOW_MINUTES', 15, errors);
+
   const tenantsFile = (env.TENANTS_FILE ?? './tenants.json').trim() || './tenants.json';
   const dryRun = parseBool(env.DRY_RUN, false);
 
@@ -143,6 +150,11 @@ export function loadConfig(env = process.env) {
     dbPath,
     campaignTickIntervalMs,
     maxCampaignRecipientsPerTick,
+    httpPort,
+    sessionTtlHours,
+    corsOrigin,
+    loginRateLimitMax,
+    loginRateLimitWindowMinutes,
     tenantsFile,
     dryRun,
     globalTestNumber,
