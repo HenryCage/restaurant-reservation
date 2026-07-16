@@ -1,7 +1,8 @@
 # User management (superadmin console, part 2 of 2)
 
 Date: 2026-07-16
-Status: designed, not yet implemented.
+Status: implemented (see docs/superpowers/plans/2026-07-16-user-management-plan.md
+for the step-by-step commit history and the live browser smoke-test results).
 Depends on: sub-projects 1-3 (Foundation merge, Customer-facing auth + HTTP API,
 Dashboard UI) and Tenant management (part 1 of 2), all implemented — this reuses
 the same `requireSuperadmin` middleware, PATCH-for-partial-update convention,

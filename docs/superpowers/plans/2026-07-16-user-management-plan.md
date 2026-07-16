@@ -1,7 +1,14 @@
 # Implementation plan: User management (superadmin console, part 2 of 2)
 
 Spec: `docs/superpowers/specs/2026-07-16-user-management-design.md`
-Status: not started.
+Status: implemented and committed (all 6 steps). Step 6's live browser
+walkthrough (Playwright, production build, scratch tenant/users) passed
+19/19 real checks: create shows a one-time temp-password banner; deactivating
+a user kills their live session immediately (a second browser context is
+kicked back to Sign in on its next request, not merely blocked from a future
+login); reset-password rotates the password (old one rejected, new one
+works) and re-triggers must-change-password; deactivating the sole active
+superadmin is rejected with a clear error rather than silently applied.
 
 ## Sequencing rationale
 
