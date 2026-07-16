@@ -1,7 +1,8 @@
 # Dashboard UI
 
 Date: 2026-07-16
-Status: approved (design), not yet implemented
+Status: implemented (see docs/superpowers/plans/2026-07-16-dashboard-ui-plan.md
+for the step-by-step commit history and the live browser smoke-test results).
 Sub-project: 3 of 4 (see `docs/superpowers/specs/2026-07-16-foundation-merge-design.md`
 Context section for the full list). Depends on sub-project 1 (Foundation
 merge) and sub-project 2 (customer-facing auth + HTTP API), both implemented.

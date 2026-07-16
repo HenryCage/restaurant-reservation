@@ -1,7 +1,11 @@
 # Implementation plan: Dashboard UI
 
 Spec: `docs/superpowers/specs/2026-07-16-dashboard-ui-design.md`
-Status: not started
+Status: implemented and committed (all 13 steps). Step 13's live browser
+walkthrough (Playwright, production build, scratch/fake credentials)
+passed 13/13 checks and caught one real bug (GET /api/orders returning 500
+instead of 502 on a rejected sheets.readOrders() promise), fixed with a
+regression test.
 
 ## Sequencing rationale
 
