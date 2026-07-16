@@ -110,4 +110,17 @@ describe('TenantListScreen', () => {
     render(<TenantListScreen {...baseProps({ api })} />);
     expect(await screen.findByText('backend unavailable')).toBeInTheDocument();
   });
+
+  it('shows the provider name for a configured tenant and a "not configured" badge otherwise', async () => {
+    const api = makeApi({
+      get: vi.fn().mockResolvedValue([
+        { id: 'swift-logistics', name: 'Swift Logistics', active: true, sheetId: 'sheet-1', smsProvider: 'termii' },
+        { id: 'lagos-couriers', name: 'Lagos Couriers', active: true, sheetId: 'sheet-2', smsProvider: '' },
+      ]),
+    });
+    render(<TenantListScreen {...baseProps({ api })} />);
+
+    expect(await screen.findByText('termii')).toBeInTheDocument();
+    expect(screen.getByText('not configured')).toBeInTheDocument();
+  });
 });

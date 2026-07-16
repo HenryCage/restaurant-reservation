@@ -88,6 +88,7 @@ function TenantListScreen({ api, refreshKey, onEdit, onCreate, onViewDashboard, 
                     <th className="py-2.5">Name</th>
                     <th className="py-2.5">Status</th>
                     <th className="py-2.5">Sheet ID</th>
+                    <th className="py-2.5">SMS Provider</th>
                     <th className="py-2.5" />
                   </tr>
                 </thead>
@@ -106,6 +107,15 @@ function TenantListScreen({ api, refreshKey, onEdit, onCreate, onViewDashboard, 
                         </span>
                       </td>
                       <td className="py-3 text-slate-500 font-mono text-xs">{t.sheetId}</td>
+                      <td className="py-3">
+                        {t.smsProvider ? (
+                          <span className="text-slate-700 font-semibold">{t.smsProvider}</span>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded-lg text-xs font-bold uppercase tracking-wide bg-rose-100 text-rose-800">
+                            not configured
+                          </span>
+                        )}
+                      </td>
                       <td className="py-3 text-right space-x-3">
                         <button
                           type="button"

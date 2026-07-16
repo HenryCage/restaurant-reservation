@@ -98,4 +98,113 @@ describe('TenantFormScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  describe('SMS provider fields', () => {
+    it('shows only the selected provider\'s fields', () => {
+      render(<TenantFormScreen api={makeApi()} mode="create" tenant={null} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText('SMS Provider'), { target: { value: 'termii' } });
+      expect(screen.getByLabelText('API Key')).toBeInTheDocument();
+      expect(screen.getByLabelText('Base URL')).toBeInTheDocument();
+      expect(screen.queryByLabelText('Username')).not.toBeInTheDocument();
+
+      fireEvent.change(screen.getByLabelText('SMS Provider'), { target: { value: 'twilio' } });
+      expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Account SID')).toBeInTheDocument();
+      expect(screen.getByLabelText('Auth Token')).toBeInTheDocument();
+      expect(screen.getByLabelText('From Number')).toBeInTheDocument();
+    });
+
+    it('create mode: submits smsProvider/smsCredentials built from the visible fields', async () => {
+      const api = makeApi({ post: vi.fn().mockResolvedValue({ id: 'swift-logistics' }) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="create" tenant={null} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      fillCoreFields();
+      fireEvent.change(screen.getByLabelText('SMS Provider'), { target: { value: 'termii' } });
+      fireEvent.change(screen.getByLabelText('API Key'), { target: { value: 'my-api-key' } });
+      fireEvent.change(screen.getByLabelText('Base URL'), { target: { value: 'https://acct.termii.com' } });
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/tenants',
+        expect.objectContaining({
+          smsProvider: 'termii',
+          smsCredentials: { apiKey: 'my-api-key', baseUrl: 'https://acct.termii.com' },
+        }),
+      );
+    });
+
+    it('edit mode: a secret field starts blank with the masked value shown as helper text', () => {
+      const tenant = {
+        id: 'swift-logistics',
+        name: 'Swift Logistics',
+        active: true,
+        sheetId: 'sheet-1',
+        sheetName: 'Orders',
+        senderId: 'SwiftLog',
+        channel: 'dnd',
+        testNumber: '',
+        syncContactsFromSheet: false,
+        notifyStatuses: ['Out for delivery'],
+        templates: { 'Out for delivery': 'Hi {name}' },
+        smsProvider: 'termii',
+        smsCredentials: { apiKey: '••••ab12', baseUrl: 'https://acct.termii.com' },
+      };
+      render(<TenantFormScreen api={makeApi()} mode="edit" tenant={tenant} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      expect(screen.getByLabelText('API Key').value).toBe('');
+      expect(screen.getByLabelText('API Key')).not.toBeRequired();
+      expect(screen.getByText(/Currently set:/)).toBeInTheDocument();
+      expect(screen.getByText('••••ab12')).toBeInTheDocument();
+      // The non-secret field prefills with the real (unmasked, already-safe) value.
+      expect(screen.getByLabelText('Base URL').value).toBe('https://acct.termii.com');
+    });
+
+    it('edit mode: leaving the secret field blank keeps smsCredentials.apiKey empty in the payload (server interprets as keep-existing)', async () => {
+      const tenant = {
+        id: 'swift-logistics',
+        name: 'Swift Logistics',
+        active: true,
+        sheetId: 'sheet-1',
+        sheetName: 'Orders',
+        senderId: 'SwiftLog',
+        channel: 'dnd',
+        testNumber: '',
+        syncContactsFromSheet: false,
+        notifyStatuses: ['Out for delivery'],
+        templates: { 'Out for delivery': 'Hi {name}' },
+        smsProvider: 'termii',
+        smsCredentials: { apiKey: '••••ab12', baseUrl: 'https://acct.termii.com' },
+      };
+      const api = makeApi({ patch: vi.fn().mockResolvedValue(tenant) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="edit" tenant={tenant} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.patch).toHaveBeenCalledWith(
+        '/api/tenants/swift-logistics',
+        expect.objectContaining({ smsCredentials: { apiKey: '', baseUrl: 'https://acct.termii.com' } }),
+      );
+    });
+
+    it('switching provider in edit mode requires the new provider\'s fields (no stale helper text)', () => {
+      const tenant = {
+        id: 'swift-logistics',
+        smsProvider: 'termii',
+        smsCredentials: { apiKey: '••••ab12', baseUrl: 'https://acct.termii.com' },
+      };
+      render(<TenantFormScreen api={makeApi()} mode="edit" tenant={tenant} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      fireEvent.change(screen.getByLabelText('SMS Provider'), { target: { value: 'twilio' } });
+      expect(screen.queryByText(/Currently set:/)).not.toBeInTheDocument();
+      expect(screen.getByLabelText('Auth Token')).toBeRequired();
+      expect(screen.getByLabelText('Auth Token').value).toBe('');
+    });
+  });
 });

@@ -7,6 +7,41 @@ function initialRows(tenant) {
   return statuses.map((status) => ({ status, template: tenant.templates?.[status] ?? '' }));
 }
 
+// Per-tenant SMS provider spec: only the fields relevant to whichever
+// provider is selected are ever shown. `secret` fields (the one genuinely
+// secret credential per provider) start blank in edit mode -- the real
+// value never round-trips back from the API, only a masked form.
+const PROVIDER_FIELDS = {
+  termii: [
+    { key: 'apiKey', label: 'API Key', secret: true },
+    { key: 'baseUrl', label: 'Base URL', secret: false },
+  ],
+  africastalking: [
+    { key: 'apiKey', label: 'API Key', secret: true },
+    { key: 'username', label: 'Username', secret: false },
+  ],
+  twilio: [
+    { key: 'accountSid', label: 'Account SID', secret: false },
+    { key: 'authToken', label: 'Auth Token', secret: true },
+    { key: 'fromNumber', label: 'From Number', secret: false },
+  ],
+};
+
+/**
+ * Secret fields always start blank; non-secret fields prefill from the
+ * tenant's stored credentials only when `provider` matches what's already
+ * stored (switching provider has nothing relevant to prefill from).
+ */
+function initialCredentials(provider, tenant) {
+  const fields = PROVIDER_FIELDS[provider] ?? [];
+  const sameProviderAsStored = tenant?.smsProvider === provider;
+  const result = {};
+  for (const f of fields) {
+    result[f.key] = f.secret ? '' : sameProviderAsStored ? tenant?.smsCredentials?.[f.key] ?? '' : '';
+  }
+  return result;
+}
+
 /**
  * Shared by create and edit -- `mode` decides which.
  * @param {{
@@ -29,8 +64,19 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
   const [testNumber, setTestNumber] = useState(tenant?.testNumber ?? '');
   const [syncContactsFromSheet, setSyncContactsFromSheet] = useState(tenant?.syncContactsFromSheet ?? false);
   const [rows, setRows] = useState(initialRows(tenant));
+  const [smsProvider, setSmsProvider] = useState(tenant?.smsProvider ?? '');
+  const [credentials, setCredentials] = useState(() => initialCredentials(tenant?.smsProvider ?? '', tenant));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  function handleProviderChange(next) {
+    setSmsProvider(next);
+    setCredentials(initialCredentials(next, tenant));
+  }
+
+  function updateCredential(key, value) {
+    setCredentials((prev) => ({ ...prev, [key]: value }));
+  }
 
   function updateRow(index, field, value) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, [field]: value } : r)));
@@ -64,6 +110,8 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
       syncContactsFromSheet,
       notifyStatuses,
       templates,
+      smsProvider,
+      smsCredentials: smsProvider === '' ? {} : credentials,
     };
 
     try {
@@ -158,6 +206,46 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
                 Sync contacts from sheet
               </label>
             </div>
+          </div>
+
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <div className="space-y-1.5">
+              <label htmlFor="smsProvider" className={labelClass}>SMS Provider</label>
+              <select
+                id="smsProvider"
+                value={smsProvider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className={inputClass}
+              >
+                <option value="">(none)</option>
+                <option value="termii">Termii</option>
+                <option value="africastalking">Africa's Talking</option>
+                <option value="twilio">Twilio</option>
+              </select>
+            </div>
+
+            {(PROVIDER_FIELDS[smsProvider] ?? []).map((f) => {
+              const canStayBlank = f.secret && isEdit && tenant?.smsProvider === smsProvider;
+              const existingMasked = canStayBlank ? tenant?.smsCredentials?.[f.key] : null;
+              return (
+                <div key={f.key} className="space-y-1.5">
+                  <label htmlFor={`smsCred-${f.key}`} className={labelClass}>{f.label}</label>
+                  <input
+                    id={`smsCred-${f.key}`}
+                    type={f.secret ? 'password' : 'text'}
+                    value={credentials[f.key] ?? ''}
+                    onChange={(e) => updateCredential(f.key, e.target.value)}
+                    required={!canStayBlank}
+                    className={inputClass}
+                  />
+                  {existingMasked && (
+                    <p className="text-xs text-slate-400">
+                      Currently set: <span className="font-mono">{existingMasked}</span> — leave blank to keep unchanged.
+                    </p>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           <div className="space-y-3 pt-2 border-t border-slate-100">
