@@ -60,6 +60,22 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at  TEXT NOT NULL,
   expires_at  TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS tenants (
+  id                       TEXT PRIMARY KEY,
+  name                     TEXT NOT NULL,
+  active                   INTEGER NOT NULL DEFAULT 0,
+  sheet_id                 TEXT NOT NULL,
+  sheet_name               TEXT NOT NULL DEFAULT 'Orders',
+  sender_id                TEXT NOT NULL,
+  channel                  TEXT NOT NULL DEFAULT 'dnd',
+  notify_statuses_json     TEXT NOT NULL DEFAULT '[]',
+  templates_json           TEXT NOT NULL DEFAULT '{}',
+  test_number              TEXT NOT NULL DEFAULT '',
+  sync_contacts_from_sheet INTEGER NOT NULL DEFAULT 0,
+  created_at               TEXT NOT NULL,
+  updated_at               TEXT NOT NULL
+);
 `;
 
 /**

@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { createDb } from '../src/db.js';
 
 describe('createDb', () => {
-  it('creates all five tables on an in-memory database', () => {
+  it('creates all six tables on an in-memory database', () => {
     const db = createDb(':memory:');
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all()
       .map((r) => r.name);
-    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts', 'sessions', 'users']);
+    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts', 'sessions', 'tenants', 'users']);
   });
 
   it('round-trips a row through each table', () => {
@@ -47,6 +47,30 @@ describe('createDb', () => {
       '2026-01-08T00:00:00.000Z',
     );
     expect(db.prepare('SELECT * FROM sessions WHERE id = ?').get('s1')).toMatchObject({ user_id: 'u1' });
+  });
+
+  it('round-trips a row through tenants', () => {
+    const db = createDb(':memory:');
+    db.prepare(
+      `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'swift-logistics',
+      'Swift Logistics',
+      1,
+      'sheet-1',
+      'Orders',
+      'SwiftLog',
+      'dnd',
+      '["Out for delivery"]',
+      '{"Out for delivery":"Hi {name}"}',
+      '',
+      0,
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-01T00:00:00.000Z',
+    );
+    const row = db.prepare('SELECT * FROM tenants WHERE id = ?').get('swift-logistics');
+    expect(row).toMatchObject({ name: 'Swift Logistics', active: 1, sender_id: 'SwiftLog' });
   });
 
   it('enforces UNIQUE(email) on users', () => {
