@@ -146,10 +146,12 @@ still `pending` are retried on the next tick, not the whole campaign.
      one named `contact.id`); insert `campaign_recipients` rows with
      `status='pending'` if not already created (idempotent — a re-run tick won't
      create duplicates).
-   - For each **pending** recipient: send via `createSmsSender()` using that
-     tenant's configured provider (Termii/AT/Twilio); write the outcome back to
-     that recipient row **immediately** (send-then-write-back-immediately, same
-     principle as `sheets.js`'s cell-scoped write-back).
+   - For each **pending** recipient: send via the same process-wide
+     `createSmsSender()` instance the sheet engine uses (provider selection is
+     global — one `SMS_PROVIDER` for the whole process, not per tenant; see
+     Config additions); write the outcome back to that recipient row
+     **immediately** (send-then-write-back-immediately, same principle as
+     `sheets.js`'s cell-scoped write-back).
    - After processing recipients, recompute `campaigns.status`.
 4. **Bulk-guard**: if `send_to = 'all'` and the contact count exceeds
    `MAX_CAMPAIGN_RECIPIENTS_PER_TICK`, only send up to the cap this tick; the rest
@@ -228,8 +230,14 @@ ignored when `NODE_ENV=production`.
 Provider-conditional, fail-fast, collected-and-thrown-once — same pattern as the
 rest of `loadConfig`:
 
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` — required only
-  if at least one tenant is configured with `provider: 'twilio'`.
+- `VALID_PROVIDERS` in `config.js` gains `'twilio'` alongside `'termii'` /
+  `'africastalking'`. Provider selection stays global and process-wide
+  (`SMS_PROVIDER` env var) exactly as it is today — there is no per-tenant
+  provider field, and campaigns reuse the same `createSmsSender()` instance the
+  sheet engine already creates in `index.js`.
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER` — required
+  only when `SMS_PROVIDER=twilio`, following the exact same provider-conditional
+  pattern already used for `TERMII_*` / `AT_*`.
 - `DB_PATH` — default `data/platform.db`.
 - `CAMPAIGN_TICK_INTERVAL_MS` — default `10000`.
 - `MAX_CAMPAIGN_RECIPIENTS_PER_TICK` — default `50`.
@@ -243,8 +251,11 @@ rest of `loadConfig`:
 - `campaignScheduler.test.js` — mirrors `processor.test.js`: fake `db`, fake
   `smsSender`, fake `clock`; covers transient retry, permanent park, bulk-guard,
   per-tenant isolation, and crash-safety at the per-recipient level.
-- `sms/twilio.test.js` — mirrors `termii.test.js` / `africasTalking.test.js`:
-  injected fake `fetch`, verifies permanent/transient error classification.
+- Twilio adapter tests are added as a new `describe('Twilio adapter', ...)`
+  block in the existing `test/sms.test.js` (which already covers Termii,
+  Africa's Talking, and the `createSmsSender` selector in one file — there's no
+  `test/sms/` subfolder to mirror). Same style: injected fake `fetch`, verifies
+  permanent/transient error classification.
 - `contacts.test.js` also covers `upsertContact` (insert new, update name on
   existing phone, isolated per `tenant_id`).
 - `processor.test.js` gains cases for the new `onNotified` hook: called with
