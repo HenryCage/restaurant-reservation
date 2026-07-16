@@ -4,9 +4,14 @@ import { useState } from 'react';
  * Superadmin-only: chooses which tenant's data to view. The chosen id is
  * held in App.jsx's React state, not the URL (no client-side router) --
  * validity is confirmed implicitly by the dashboard's first real fetch.
- * @param {{ onPick: (tenantId: string) => void, onManageTenants: () => void }} props
+ * @param {{
+ *   onPick: (tenantId: string) => void,
+ *   onManageTenants: () => void,
+ *   onManageUsers: (tenantId: string) => void,
+ *   onManageSuperadmins: () => void,
+ * }} props
  */
-function TenantPickerScreen({ onPick, onManageTenants }) {
+function TenantPickerScreen({ onPick, onManageTenants, onManageUsers, onManageSuperadmins }) {
   const [tenantId, setTenantId] = useState('');
 
   function handleSubmit(e) {
@@ -14,6 +19,12 @@ function TenantPickerScreen({ onPick, onManageTenants }) {
     const trimmed = tenantId.trim();
     if (trimmed === '') return;
     onPick(trimmed);
+  }
+
+  function handleManageUsers() {
+    const trimmed = tenantId.trim();
+    if (trimmed === '') return;
+    onManageUsers(trimmed);
   }
 
   return (
@@ -39,21 +50,39 @@ function TenantPickerScreen({ onPick, onManageTenants }) {
             />
           </div>
 
-          <button
-            type="submit"
-            className="w-full flex items-center justify-center gap-2 mt-4 py-3.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-[0.99]"
-          >
-            Continue
-          </button>
+          <div className="flex gap-3 mt-4">
+            <button
+              type="submit"
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-slate-900 text-white rounded-xl text-sm font-bold hover:bg-slate-800 transition-all active:scale-[0.99]"
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              onClick={handleManageUsers}
+              className="flex-1 flex items-center justify-center gap-2 py-3.5 bg-slate-100 text-slate-700 rounded-xl text-sm font-bold hover:bg-slate-200 transition-all active:scale-[0.99]"
+            >
+              Manage users
+            </button>
+          </div>
         </form>
 
-        <button
-          type="button"
-          onClick={onManageTenants}
-          className="w-full text-center text-sm font-bold text-slate-500 hover:text-slate-900"
-        >
-          Manage tenants →
-        </button>
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={onManageTenants}
+            className="w-full text-center text-sm font-bold text-slate-500 hover:text-slate-900"
+          >
+            Manage tenants →
+          </button>
+          <button
+            type="button"
+            onClick={onManageSuperadmins}
+            className="w-full text-center text-sm font-bold text-slate-500 hover:text-slate-900"
+          >
+            Manage superadmins →
+          </button>
+        </div>
       </div>
     </div>
   );

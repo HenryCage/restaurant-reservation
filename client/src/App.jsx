@@ -4,14 +4,17 @@ import LoginScreen from './screens/LoginScreen.jsx';
 import ChangePasswordScreen from './screens/ChangePasswordScreen.jsx';
 import TenantPickerScreen from './screens/TenantPickerScreen.jsx';
 import TenantManagementScreen from './screens/TenantManagementScreen.jsx';
+import UserManagementScreen from './screens/UserManagementScreen.jsx';
 import DashboardScreen from './screens/DashboardScreen.jsx';
 
 // loading -> login -> (changePassword) -> (tenantPicker, superadmin only) -> dashboard
 //                                                    \-> tenantManagement (superadmin only) -/
+//                                                    \-> userManagement (superadmin only) -/
 function App() {
   const [screen, setScreen] = useState('loading');
   const [sessionMessage, setSessionMessage] = useState(null);
   const [chosenTenantId, setChosenTenantId] = useState(null);
+  const [userManagementScope, setUserManagementScope] = useState(null);
   // Distinguishes "never logged in" (first /auth/me check, 401 is normal --
   // no notice) from "was logged in, session died" (401 later -- show the
   // notice) for the same onUnauthorized callback.
@@ -103,6 +106,21 @@ function App() {
     setScreen('tenantPicker');
   }
 
+  function handleManageUsers(tenantId) {
+    setUserManagementScope({ type: 'tenant', tenantId });
+    setScreen('userManagement');
+  }
+
+  function handleManageSuperadmins() {
+    setUserManagementScope({ type: 'superadmin' });
+    setScreen('userManagement');
+  }
+
+  function handleBackFromUserManagement() {
+    setUserManagementScope(null);
+    setScreen('tenantPicker');
+  }
+
   async function handleLogout() {
     try {
       await api.post('/auth/logout', {});
@@ -128,11 +146,22 @@ function App() {
   }
 
   if (screen === 'tenantPicker') {
-    return <TenantPickerScreen onPick={handleTenantPicked} onManageTenants={handleManageTenants} />;
+    return (
+      <TenantPickerScreen
+        onPick={handleTenantPicked}
+        onManageTenants={handleManageTenants}
+        onManageUsers={handleManageUsers}
+        onManageSuperadmins={handleManageSuperadmins}
+      />
+    );
   }
 
   if (screen === 'tenantManagement') {
     return <TenantManagementScreen api={api} onBack={handleBackFromTenantManagement} />;
+  }
+
+  if (screen === 'userManagement') {
+    return <UserManagementScreen api={api} scope={userManagementScope} onBack={handleBackFromUserManagement} />;
   }
 
   if (screen === 'dashboard') {
