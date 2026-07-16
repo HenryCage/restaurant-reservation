@@ -10,12 +10,11 @@
 //   node scripts/create-user.mjs --email=a@example.com --tenant=<id> --password=<explicit password>
 
 import 'dotenv/config';
-import { randomBytes } from 'node:crypto';
 import { loadConfig } from '../src/config.js';
 import { createLogger } from '../src/logger.js';
 import { createTenantRegistry } from '../src/tenants.js';
 import { createDb } from '../src/db.js';
-import { createAuthStore, MIN_PASSWORD_LEN } from '../src/auth.js';
+import { createAuthStore, generateTempPassword, MIN_PASSWORD_LEN } from '../src/auth.js';
 
 /** @param {string[]} argv @returns {Record<string, string|true>} */
 function parseArgs(argv) {
@@ -29,11 +28,6 @@ function parseArgs(argv) {
   return args;
 }
 
-/** URL-safe, no ambiguous separators to read out loud. */
-function generatePassword() {
-  return randomBytes(12).toString('base64url');
-}
-
 /** @param {string} message */
 function fail(message) {
   console.error(`Error: ${message}`);
@@ -45,7 +39,7 @@ function main() {
   const email = typeof args.email === 'string' ? args.email.trim() : '';
   const isSuperadmin = args.superadmin === true;
   const tenantId = typeof args.tenant === 'string' ? args.tenant.trim() : '';
-  const password = typeof args.password === 'string' ? args.password : generatePassword();
+  const password = typeof args.password === 'string' ? args.password : generateTempPassword();
 
   if (!email) return fail('--email=<email> is required');
   if (isSuperadmin && tenantId) return fail('--superadmin and --tenant are mutually exclusive');
