@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { createDb } from '../src/db.js';
 
 describe('createDb', () => {
-  it('creates all three tables on an in-memory database', () => {
+  it('creates all five tables on an in-memory database', () => {
     const db = createDb(':memory:');
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all()
       .map((r) => r.name);
-    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts']);
+    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts', 'sessions', 'users']);
   });
 
   it('round-trips a row through each table', () => {
@@ -30,6 +30,32 @@ describe('createDb', () => {
     expect(db.prepare('SELECT * FROM campaign_recipients WHERE id = ?').get('r1')).toMatchObject({
       status: 'pending',
     });
+  });
+
+  it('round-trips a row through users and sessions', () => {
+    const db = createDb(':memory:');
+
+    db.prepare(
+      'INSERT INTO users (id, tenant_id, email, password_hash, is_superadmin, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run('u1', 't1', 'a@example.com', 'scrypt:aa:bb', 0, 1, '2026-01-01T00:00:00.000Z');
+    expect(db.prepare('SELECT * FROM users WHERE id = ?').get('u1')).toMatchObject({ email: 'a@example.com' });
+
+    db.prepare('INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
+      's1',
+      'u1',
+      '2026-01-01T00:00:00.000Z',
+      '2026-01-08T00:00:00.000Z',
+    );
+    expect(db.prepare('SELECT * FROM sessions WHERE id = ?').get('s1')).toMatchObject({ user_id: 'u1' });
+  });
+
+  it('enforces UNIQUE(email) on users', () => {
+    const db = createDb(':memory:');
+    const insert = db.prepare(
+      'INSERT INTO users (id, tenant_id, email, password_hash, is_superadmin, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    );
+    insert.run('u1', 't1', 'a@example.com', 'h1', 0, 1, '2026-01-01T00:00:00.000Z');
+    expect(() => insert.run('u2', 't2', 'a@example.com', 'h2', 0, 1, '2026-01-01T00:00:00.000Z')).toThrow();
   });
 
   it('enforces UNIQUE(tenant_id, phone) on contacts', () => {

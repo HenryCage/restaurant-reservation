@@ -53,6 +53,7 @@ export function createCampaignsStore(db, deps = {}) {
   );
   const findContactStmt = db.prepare('SELECT id, phone FROM contacts WHERE tenant_id = ? AND id = ?');
   const tenantContactsStmt = db.prepare('SELECT id, phone FROM contacts WHERE tenant_id = ?');
+  const listCampaignsStmt = db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? ORDER BY created_at DESC');
   const dueCampaignsStmt = db.prepare(
     `SELECT * FROM campaigns WHERE status IN ('pending','processing') AND scheduled_time <= ? ORDER BY scheduled_time`,
   );
@@ -112,6 +113,15 @@ export function createCampaignsStore(db, deps = {}) {
      */
     listDueCampaigns(at) {
       return dueCampaignsStmt.all(at.toISOString()).map(toCampaign);
+    },
+
+    /**
+     * All campaigns for one tenant, newest first (HTTP API read path).
+     * @param {string} tenantId
+     * @returns {ReturnType<typeof toCampaign>[]}
+     */
+    listCampaigns(tenantId) {
+      return listCampaignsStmt.all(tenantId).map(toCampaign);
     },
 
     /**

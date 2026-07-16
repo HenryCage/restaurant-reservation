@@ -43,6 +43,23 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
   error                TEXT,
   sent_at              TEXT
 );
+
+CREATE TABLE IF NOT EXISTS users (
+  id                    TEXT PRIMARY KEY,
+  tenant_id             TEXT,
+  email                 TEXT NOT NULL UNIQUE,
+  password_hash         TEXT NOT NULL,
+  is_superadmin         INTEGER NOT NULL DEFAULT 0,
+  must_change_password  INTEGER NOT NULL DEFAULT 1,
+  created_at            TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id          TEXT PRIMARY KEY,
+  user_id     TEXT NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL,
+  expires_at  TEXT NOT NULL
+);
 `;
 
 /**

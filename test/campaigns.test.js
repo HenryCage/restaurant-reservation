@@ -71,6 +71,24 @@ describe('createCampaignsStore', () => {
     });
   });
 
+  describe('listCampaigns', () => {
+    it('returns only the requesting tenant campaigns, newest first', () => {
+      // Distinct, increasing timestamps so ORDER BY created_at DESC is deterministic
+      // (the shared-fixed-clock makeStores() would tie all rows to the same instant).
+      let clock = new Date('2025-01-01T00:00:00.000Z').getTime();
+      const tickingNow = () => new Date(clock++);
+      const { campaigns } = makeStores(tickingNow);
+
+      campaigns.createCampaign('t1', { name: 'First', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.createCampaign('t2', { name: 'Other tenant', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.createCampaign('t1', { name: 'Second', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+
+      const list = campaigns.listCampaigns('t1');
+      expect(list).toHaveLength(2);
+      expect(list.map((c) => c.name)).toEqual(['Second', 'First']);
+    });
+  });
+
   describe('ensureRecipients', () => {
     it('creates one recipient per tenant contact for "all", and is idempotent', () => {
       const { contacts, campaigns } = makeStores();
