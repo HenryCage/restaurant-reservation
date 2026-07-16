@@ -92,6 +92,22 @@ function ensureUsersActiveColumn(db) {
 }
 
 /**
+ * Same self-healing pattern as ensureUsersActiveColumn -- `tenants` already
+ * exists in every deployed database (including the just-migrated real one),
+ * so these two columns can't be added via the CREATE TABLE literal either.
+ * @param {import('better-sqlite3').Database} db
+ */
+function ensureTenantsSmsColumns(db) {
+  const cols = db.prepare('PRAGMA table_info(tenants)').all().map((col) => col.name);
+  if (!cols.includes('sms_provider')) {
+    db.exec("ALTER TABLE tenants ADD COLUMN sms_provider TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('sms_credentials_json')) {
+    db.exec("ALTER TABLE tenants ADD COLUMN sms_credentials_json TEXT NOT NULL DEFAULT '{}'");
+  }
+}
+
+/**
  * Open (or create) the SQLite database and ensure the schema exists.
  * @param {string} path - filesystem path, or ':memory:' for tests.
  * @returns {import('better-sqlite3').Database}
@@ -102,5 +118,6 @@ export function createDb(path) {
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
   ensureUsersActiveColumn(db);
+  ensureTenantsSmsColumns(db);
   return db;
 }
