@@ -70,7 +70,7 @@ describe('parseOrders — header-driven mapping survives reordering/insertion', 
   it('maps the right cells when columns are reordered and a column is inserted', () => {
     const values = [
       ['Notes', 'Phone', 'Order ID', 'Status', 'Customer Name', 'Amount', 'Last Error', 'Notified At', 'Last Notified Status'],
-      ['ignore me', '08012345678', '1234', 'Out for delivery', 'Chidi', '15000', '', '', ''],
+      ['ignore me', '08012345678', '1234', 'Out for delivery', 'Chidi', '15000', 'timeout', '', ''],
     ];
     const out = parseOrders(values);
     expect(out.ok).toBe(true);
@@ -84,6 +84,7 @@ describe('parseOrders — header-driven mapping survives reordering/insertion', 
       expect(r.name).toBe('Chidi');
       expect(r.amount).toBe('15000');
       expect(r.lastNotifiedStatus).toBe('');
+      expect(r.lastError).toBe('timeout');
     }
   });
 

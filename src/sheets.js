@@ -100,6 +100,7 @@ export function buildColumnIndex(headerRow) {
  * @property {string} amount
  * @property {string} status
  * @property {string} lastNotifiedStatus
+ * @property {string} lastError
  */
 
 /**
@@ -145,6 +146,7 @@ export function parseOrders(values) {
       amount: cell(raw, 'amount'),
       status,
       lastNotifiedStatus: cell(raw, 'lastNotifiedStatus'),
+      lastError: cell(raw, 'lastError'),
     });
   }
 
