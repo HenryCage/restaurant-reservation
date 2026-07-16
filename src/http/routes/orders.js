@@ -30,7 +30,20 @@ export function createOrdersRoutes({ requireAuth, registry, sheets }) {
       return;
     }
 
-    const read = await sheets.readOrders(tenant.sheetId, tenant.sheetName);
+    // sheets.readOrders() can reject outright (e.g. invalid Google
+    // credentials, network failure), not just resolve with { ok: false } --
+    // processor.js is protected from this by its own per-tenant try/catch;
+    // this route needs the same, otherwise a thrown error here would fall
+    // through to the generic 500 handler instead of the 502 this endpoint
+    // promises for "the sheet read failed" (caught live via the sub-project
+    // 3 smoke test, which used deliberately-invalid credentials).
+    let read;
+    try {
+      read = await sheets.readOrders(tenant.sheetId, tenant.sheetName);
+    } catch (err) {
+      res.status(502).json({ error: err?.message ?? String(err) });
+      return;
+    }
     if (!read.ok) {
       res.status(502).json({ error: read.error });
       return;

@@ -102,7 +102,7 @@ describe('GET /api/orders', () => {
     expect(res.status).toBe(404);
   });
 
-  it('a sheets.readOrders failure surfaces as 502, not a crash', async () => {
+  it('a sheets.readOrders failure ({ ok: false }) surfaces as 502, not a crash', async () => {
     const sheets = fakeSheets({ 'sheet-t1': { ok: false, error: 'sheet is empty (no header row)' } });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
@@ -110,5 +110,23 @@ describe('GET /api/orders', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBe('sheet is empty (no header row)');
+  });
+
+  it('a sheets.readOrders rejection (e.g. bad credentials) also surfaces as 502, not a 500', async () => {
+    // Found live via the sub-project 3 browser smoke test: a real Google
+    // auth failure rejects the promise outright rather than resolving with
+    // { ok: false }, which previously fell through to the generic 500
+    // handler instead of this route's own 502.
+    const sheets = {
+      readOrders: async () => {
+        throw new Error('invalid_grant: could not sign JWT');
+      },
+    };
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toBe('invalid_grant: could not sign JWT');
   });
 });
