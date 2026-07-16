@@ -6,6 +6,7 @@
 
 import { createTermiiAdapter } from './termii.js';
 import { createAfricasTalkingAdapter } from './africasTalking.js';
+import { createTwilioAdapter } from './twilio.js';
 
 /**
  * @typedef {{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }} SendResult
@@ -26,6 +27,14 @@ export function createSmsSender(config, deps = {}) {
     adapter = createTermiiAdapter({
       apiKey: config.termii.apiKey,
       baseUrl: config.termii.baseUrl,
+      timeoutMs: config.httpTimeoutMs,
+      fetchFn,
+    });
+  } else if (config.smsProvider === 'twilio') {
+    adapter = createTwilioAdapter({
+      accountSid: config.twilio.accountSid,
+      authToken: config.twilio.authToken,
+      fromNumber: config.twilio.fromNumber,
       timeoutMs: config.httpTimeoutMs,
       fetchFn,
     });

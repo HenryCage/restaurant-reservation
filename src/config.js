@@ -5,7 +5,7 @@
 // rediscovering errors one restart at a time. loadConfig() is pure (it reads
 // from a passed-in env object) so it is unit-testable without touching process.env.
 
-const VALID_PROVIDERS = new Set(['termii', 'africastalking']);
+const VALID_PROVIDERS = new Set(['termii', 'africastalking', 'twilio']);
 
 /**
  * @param {string|undefined} value
@@ -85,6 +85,11 @@ export function loadConfig(env = process.env) {
     apiKey: (env.AT_API_KEY ?? '').trim(),
     username: (env.AT_USERNAME ?? '').trim(),
   };
+  const twilio = {
+    accountSid: (env.TWILIO_ACCOUNT_SID ?? '').trim(),
+    authToken: (env.TWILIO_AUTH_TOKEN ?? '').trim(),
+    fromNumber: (env.TWILIO_FROM_NUMBER ?? '').trim(),
+  };
 
   if (smsProvider === 'termii') {
     if (termii.apiKey === '') errors.push('TERMII_API_KEY is required when SMS_PROVIDER=termii');
@@ -92,6 +97,10 @@ export function loadConfig(env = process.env) {
   } else if (smsProvider === 'africastalking') {
     if (africasTalking.apiKey === '') errors.push('AT_API_KEY is required when SMS_PROVIDER=africastalking');
     if (africasTalking.username === '') errors.push('AT_USERNAME is required when SMS_PROVIDER=africastalking');
+  } else if (smsProvider === 'twilio') {
+    if (twilio.accountSid === '') errors.push('TWILIO_ACCOUNT_SID is required when SMS_PROVIDER=twilio');
+    if (twilio.authToken === '') errors.push('TWILIO_AUTH_TOKEN is required when SMS_PROVIDER=twilio');
+    if (twilio.fromNumber === '') errors.push('TWILIO_FROM_NUMBER is required when SMS_PROVIDER=twilio');
   }
 
   const defaultCountryCode = (env.DEFAULT_COUNTRY_CODE ?? '234').replace(/\D/g, '') || '234';
@@ -120,6 +129,7 @@ export function loadConfig(env = process.env) {
     smsProvider,
     termii: Object.freeze(termii),
     africasTalking: Object.freeze(africasTalking),
+    twilio: Object.freeze(twilio),
     defaultCountryCode,
     pollIntervalSeconds,
     sendDelayMs,

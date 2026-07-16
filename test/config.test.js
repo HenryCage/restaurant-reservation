@@ -58,7 +58,27 @@ describe('loadConfig — validation', () => {
   });
 
   it('rejects an unknown provider', () => {
-    expect(() => loadConfig(baseEnv({ SMS_PROVIDER: 'twilio' }))).toThrow(/SMS_PROVIDER/);
+    expect(() => loadConfig(baseEnv({ SMS_PROVIDER: 'nonexistent-provider' }))).toThrow(/SMS_PROVIDER/);
+  });
+
+  it('requires Twilio vars when provider is twilio', () => {
+    const env = baseEnv({ SMS_PROVIDER: 'twilio', TERMII_API_KEY: '', TERMII_BASE_URL: '' });
+    expect(() => loadConfig(env)).toThrow(/TWILIO_ACCOUNT_SID[\s\S]*TWILIO_AUTH_TOKEN[\s\S]*TWILIO_FROM_NUMBER/);
+  });
+
+  it('parses a valid Twilio config', () => {
+    const cfg = loadConfig(
+      baseEnv({
+        SMS_PROVIDER: 'twilio',
+        TERMII_API_KEY: '',
+        TERMII_BASE_URL: '',
+        TWILIO_ACCOUNT_SID: 'ACxxxx',
+        TWILIO_AUTH_TOKEN: 'secret',
+        TWILIO_FROM_NUMBER: '+15005550006',
+      }),
+    );
+    expect(cfg.smsProvider).toBe('twilio');
+    expect(cfg.twilio).toEqual({ accountSid: 'ACxxxx', authToken: 'secret', fromNumber: '+15005550006' });
   });
 
   it('rejects a non-integer numeric env var', () => {
