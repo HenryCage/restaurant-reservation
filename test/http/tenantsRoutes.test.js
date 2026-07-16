@@ -170,5 +170,61 @@ describe('/api/tenants', () => {
       expect(list).toHaveLength(1);
       expect(list[0].active).toBe(false);
     });
+
+    describe('SMS provider secret masking', () => {
+      it('POST / and GET / never return the real secret, only a masked form', async () => {
+        ctx = await startTestServer();
+        const { cookie } = await loginSuperadmin(ctx);
+
+        const createRes = await fetch(`${ctx.baseUrl}/api/tenants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify(
+            tenantPayload({ smsProvider: 'termii', smsCredentials: { apiKey: 'super-secret-key', baseUrl: 'https://x' } }),
+          ),
+        });
+        expect(createRes.status).toBe(201);
+        const created = await createRes.json();
+        expect(created.smsCredentials.apiKey).not.toBe('super-secret-key');
+        expect(created.smsCredentials.apiKey).toMatch(/^••••/);
+        expect(created.smsCredentials.baseUrl).toBe('https://x'); // not secret, passes through
+
+        const listRes = await fetch(`${ctx.baseUrl}/api/tenants`, { headers: { Cookie: cookie } });
+        const [listed] = await listRes.json();
+        expect(listed.smsCredentials.apiKey).not.toBe('super-secret-key');
+
+        // The real value is still what the sending path would actually use.
+        const [stored] = ctx.registry.listAll();
+        expect(stored.smsCredentials.apiKey).toBe('super-secret-key');
+      });
+
+      it('PATCH response is also masked, and a blank secret field preserves the stored real value', async () => {
+        ctx = await startTestServer();
+        const { cookie } = await loginSuperadmin(ctx);
+        await fetch(`${ctx.baseUrl}/api/tenants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify(
+            tenantPayload({ smsProvider: 'termii', smsCredentials: { apiKey: 'real-secret', baseUrl: 'https://x' } }),
+          ),
+        });
+
+        const patchRes = await fetch(`${ctx.baseUrl}/api/tenants/swift-logistics`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify({
+            smsProvider: 'termii',
+            smsCredentials: { apiKey: '', baseUrl: 'https://x' }, // blank = keep existing
+          }),
+        });
+        expect(patchRes.status).toBe(200);
+        const patched = await patchRes.json();
+        expect(patched.smsCredentials.apiKey).not.toBe('real-secret');
+        expect(patched.smsCredentials.apiKey).toMatch(/^••••/);
+
+        const [stored] = ctx.registry.listAll();
+        expect(stored.smsCredentials.apiKey).toBe('real-secret'); // untouched
+      });
+    });
   });
 });

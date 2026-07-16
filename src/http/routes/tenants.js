@@ -4,6 +4,16 @@
 // scoping involved, unlike every other /api/* route.
 
 import express from 'express';
+import { maskSmsCredentials } from '../../tenants.js';
+
+/**
+ * Applied only at the HTTP response boundary (Per-tenant SMS provider spec)
+ * -- the underlying stored value and the sending path never see this.
+ * @param {any} tenant
+ */
+function maskTenant(tenant) {
+  return { ...tenant, smsCredentials: maskSmsCredentials(tenant.smsProvider, tenant.smsCredentials) };
+}
 
 /**
  * @param {{
@@ -17,7 +27,7 @@ export function createTenantsRoutes({ requireSuperadmin, registry }) {
   router.get('/', requireSuperadmin, (req, res) => {
     // Every tenant, active or not -- the admin view needs deactivated ones
     // visible, to be able to reactivate them.
-    res.status(200).json(registry.listAll());
+    res.status(200).json(registry.listAll().map(maskTenant));
   });
 
   router.post('/', requireSuperadmin, (req, res) => {
@@ -26,7 +36,7 @@ export function createTenantsRoutes({ requireSuperadmin, registry }) {
       res.status(400).json({ error: result.error });
       return;
     }
-    res.status(201).json(result.tenant);
+    res.status(201).json(maskTenant(result.tenant));
   });
 
   router.patch('/:id', requireSuperadmin, (req, res) => {
@@ -42,7 +52,7 @@ export function createTenantsRoutes({ requireSuperadmin, registry }) {
       res.status(400).json({ error: result.error });
       return;
     }
-    res.status(200).json(result.tenant);
+    res.status(200).json(maskTenant(result.tenant));
   });
 
   return router;
