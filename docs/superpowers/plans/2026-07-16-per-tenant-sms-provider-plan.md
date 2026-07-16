@@ -1,7 +1,15 @@
 # Implementation plan: Per-tenant SMS provider
 
 Spec: `docs/superpowers/specs/2026-07-16-per-tenant-sms-provider-design.md`
-Status: not started.
+Status: implemented and committed (all 8 steps). Step 8's live browser
+walkthrough (Playwright, production build, scratch tenant) passed 17/17
+real checks: an unconfigured tenant shows a "not configured" badge and is
+skipped at send time with a warning log (confirmed in the server's own
+output, not just a unit test); configuring Termii then re-editing without
+touching the API Key field preserves the real stored value (confirmed via
+a direct read of the scratch SQLite file); switching to Twilio drops the
+stale Termii fields/helper text, requires Twilio's own fields client-side,
+and the final stored row exactly matches what was submitted.
 
 ## Sequencing rationale
 

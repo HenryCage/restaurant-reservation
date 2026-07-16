@@ -1,7 +1,8 @@
 # Per-tenant SMS provider
 
 Date: 2026-07-16
-Status: designed, not yet implemented.
+Status: implemented (see docs/superpowers/plans/2026-07-16-per-tenant-sms-provider-plan.md
+for the step-by-step commit history and the live browser smoke-test results).
 Depends on: Tenant management (tenant config lives in SQLite `tenants` table,
 `requireSuperadmin`-gated CRUD, `TenantFormScreen`/`TenantListScreen`), all
 implemented.
