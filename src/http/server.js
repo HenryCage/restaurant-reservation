@@ -7,15 +7,18 @@
 import express from 'express';
 import cors from 'cors';
 import { createAuthRoutes } from './routes/auth.js';
+import { createContactsRoutes } from './routes/contacts.js';
+import { createCampaignsRoutes } from './routes/campaigns.js';
 import { createRateLimiter } from './rateLimiter.js';
+import { createRequireAuth } from './middleware/requireAuth.js';
 
 /**
  * @param {{
  *   config: import('../config.js').Config,
  *   logger: import('../logger.js').Logger,
  *   authStore: ReturnType<typeof import('../auth.js').createAuthStore>,
- *   contactsStore?: ReturnType<typeof import('../contacts.js').createContactsStore>,
- *   campaignsStore?: ReturnType<typeof import('../campaigns.js').createCampaignsStore>,
+ *   contactsStore: ReturnType<typeof import('../contacts.js').createContactsStore>,
+ *   campaignsStore: ReturnType<typeof import('../campaigns.js').createCampaignsStore>,
  * }} deps
  */
 export function createHttpServer({ config, logger, authStore, contactsStore, campaignsStore }) {
@@ -32,8 +35,10 @@ export function createHttpServer({ config, logger, authStore, contactsStore, cam
 
   app.use('/auth', createAuthRoutes({ authStore, config, rateLimiter }));
 
-  // contactsStore/campaignsStore routes are mounted once their route files
-  // exist (kept optional here so this file is usable before that lands).
+  // No exemptPaths: every /api/* route stays blocked by must_change_password.
+  const apiRequireAuth = createRequireAuth({ authStore });
+  app.use('/api/contacts', createContactsRoutes({ requireAuth: apiRequireAuth, contactsStore }));
+  app.use('/api/campaigns', createCampaignsRoutes({ requireAuth: apiRequireAuth, campaignsStore }));
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not found' });
