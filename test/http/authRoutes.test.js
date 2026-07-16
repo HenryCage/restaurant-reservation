@@ -57,6 +57,37 @@ describe('POST /auth/login', () => {
   });
 });
 
+describe('GET /auth/me', () => {
+  it('returns 401 with no session', async () => {
+    ctx = await startTestServer();
+    const res = await fetch(`${ctx.baseUrl}/auth/me`);
+    expect(res.status).toBe(401);
+  });
+
+  it('returns the same-shaped body as login for a logged-in, non-gated user', async () => {
+    ctx = await startTestServer();
+    const user = ctx.authStore.createUser({ tenantId: 't1', email: 'a@example.com', password: 'original-pw' });
+    ctx.authStore.changePassword(user.id, { currentPassword: 'original-pw', newPassword: 'brand-new-pw' });
+    const loginRes = await login(ctx.baseUrl, 'a@example.com', 'brand-new-pw');
+    const cookie = extractCookie(loginRes);
+
+    const res = await fetch(`${ctx.baseUrl}/auth/me`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ mustChangePassword: false, tenantId: 't1', isSuperadmin: false });
+  });
+
+  it('stays reachable (not 403) while must_change_password is true, and reflects it', async () => {
+    ctx = await startTestServer();
+    ctx.authStore.createUser({ tenantId: 't1', email: 'a@example.com', password: 'original-pw' });
+    const loginRes = await login(ctx.baseUrl, 'a@example.com', 'original-pw');
+    const cookie = extractCookie(loginRes);
+
+    const res = await fetch(`${ctx.baseUrl}/auth/me`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).mustChangePassword).toBe(true);
+  });
+});
+
 describe('must_change_password gate', () => {
   it('lets /auth/change-password through despite the gate, and clears it on success', async () => {
     ctx = await startTestServer();

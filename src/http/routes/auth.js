@@ -15,10 +15,11 @@ export const SESSION_COOKIE_NAME = 'sid';
  */
 export function createAuthRoutes({ authStore, config, rateLimiter }) {
   const router = express.Router();
-  // change-password and logout stay reachable while must_change_password is
-  // still set -- the gate blocks access to data, not the ability to log out
-  // or complete the one action that clears it (spec: "besides login/logout").
-  const requireAuth = createRequireAuth({ authStore, exemptPaths: ['/change-password', '/logout'] });
+  // change-password, logout, and me stay reachable while must_change_password
+  // is still set -- the gate blocks access to data, not the ability to log
+  // out, complete the one action that clears it, or ask "am I gated?" on a
+  // fresh page load (spec: "besides login/logout").
+  const requireAuth = createRequireAuth({ authStore, exemptPaths: ['/change-password', '/logout', '/me'] });
 
   router.post('/login', (req, res) => {
     const { email, password } = req.body ?? {};
@@ -51,6 +52,18 @@ export function createAuthRoutes({ authStore, config, rateLimiter }) {
         secure: config.isProduction,
       }),
     );
+    res.status(200).json({
+      mustChangePassword: user.mustChangePassword,
+      tenantId: user.tenantId,
+      isSuperadmin: user.isSuperadmin,
+    });
+  });
+
+  router.get('/me', requireAuth, (req, res) => {
+    // req.authUser doesn't carry mustChangePassword (it's meaningless once
+    // requireAuth has already let a normal route through) -- this route is
+    // exempt from the gate specifically so it can still report it.
+    const user = authStore.getUser(req.authUser.id);
     res.status(200).json({
       mustChangePassword: user.mustChangePassword,
       tenantId: user.tenantId,
