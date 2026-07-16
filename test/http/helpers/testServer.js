@@ -5,6 +5,7 @@ import { createDb } from '../../../src/db.js';
 import { createAuthStore } from '../../../src/auth.js';
 import { createContactsStore } from '../../../src/contacts.js';
 import { createCampaignsStore } from '../../../src/campaigns.js';
+import { createTenantRegistry } from '../../../src/tenants.js';
 import { createHttpServer } from '../../../src/http/server.js';
 
 export function silentLogger() {
@@ -34,7 +35,10 @@ export async function startTestServer(opts = {}) {
   const contactsStore = createContactsStore(db, opts.now ? { now: opts.now } : {});
   const campaignsStore = createCampaignsStore(db, opts.now ? { now: opts.now } : {});
   const config = baseTestConfig(opts.configOverrides);
-  const registry = opts.registry ?? { load: () => [] };
+  // Real SQLite-backed registry by default (same db as everything else) so
+  // tenant CRUD tests exercise the actual store; tests that only care about
+  // .load() (e.g. orders routes) can still pass a lighter opts.registry fake.
+  const registry = opts.registry ?? createTenantRegistry({ db, logger: silentLogger() });
   const sheets = opts.sheets ?? { readOrders: async () => ({ ok: true, rows: [] }) };
   const app = createHttpServer({
     config,
@@ -57,6 +61,7 @@ export async function startTestServer(opts = {}) {
     authStore,
     contactsStore,
     campaignsStore,
+    registry,
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
