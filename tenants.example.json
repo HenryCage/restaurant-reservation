@@ -12,7 +12,8 @@
       "templates": {
         "Out for delivery": "Hi {name}, your order #{orderId} is out for delivery.[[ Please have NGN {amount} ready (cash or transfer).]] Thank you - Swift Logistics."
       },
-      "testNumber": ""
+      "testNumber": "",
+      "syncContactsFromSheet": false
     },
     {
       "id": "lagos-couriers",
@@ -27,7 +28,8 @@
         "Out for delivery": "Hello {name}, order #{orderId} is on the way.[[ Have NGN {amount} ready.]] - Lagos Couriers",
         "Delivered": "Order #{orderId} delivered. Thank you for choosing Lagos Couriers!"
       },
-      "testNumber": ""
+      "testNumber": "",
+      "syncContactsFromSheet": false
     }
   ]
 }

@@ -36,6 +36,7 @@ export function canonicalStatus(s) {
  * @property {string} senderId
  * @property {string} channel
  * @property {string} testNumber
+ * @property {boolean} syncContactsFromSheet
  * @property {string[]} notifyStatuses
  * @property {Set<string>} notifyStatusesCanonical
  * @property {Record<string,string>} templates
@@ -114,6 +115,9 @@ export function validateTenant(raw, ctx, logger) {
     typeof raw.channel === 'string' && raw.channel.trim() !== '' ? raw.channel.trim() : DEFAULT_CHANNEL;
   const testNumber = typeof raw.testNumber === 'string' ? raw.testNumber.trim() : '';
   const name = typeof raw.name === 'string' && raw.name.trim() !== '' ? raw.name.trim() : id;
+  // Opt-in only: absent, wrong type, or any non-true value all default to false
+  // (Foundation merge spec's "Sheet -> contacts sync" section).
+  const syncContactsFromSheet = raw.syncContactsFromSheet === true;
 
   return {
     id,
@@ -124,6 +128,7 @@ export function validateTenant(raw, ctx, logger) {
     senderId,
     channel,
     testNumber,
+    syncContactsFromSheet,
     notifyStatuses,
     notifyStatusesCanonical,
     templates: { ...raw.templates },

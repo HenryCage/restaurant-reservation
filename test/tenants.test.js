@@ -40,6 +40,19 @@ describe('validateRegistry', () => {
     expect(out[0].templatesByCanonical['out for delivery']).toContain('out for delivery');
   });
 
+  it('defaults syncContactsFromSheet to false when absent, parses true when present', () => {
+    const log = fakeLogger();
+    const [withoutField] = validateRegistry({ tenants: [tenant()] }, log);
+    expect(withoutField.syncContactsFromSheet).toBe(false);
+
+    const [withField] = validateRegistry({ tenants: [tenant({ syncContactsFromSheet: true })] }, log);
+    expect(withField.syncContactsFromSheet).toBe(true);
+
+    // Any non-true value (wrong type, truthy-but-not-boolean) also defaults to false.
+    const [wrongType] = validateRegistry({ tenants: [tenant({ syncContactsFromSheet: 'true' })] }, log);
+    expect(wrongType.syncContactsFromSheet).toBe(false);
+  });
+
   it('skips inactive tenants', () => {
     const log = fakeLogger();
     const out = validateRegistry({ tenants: [tenant({ active: false })] }, log);
