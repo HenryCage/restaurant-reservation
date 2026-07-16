@@ -62,4 +62,22 @@ describe('createApiClient', () => {
     expect(options.headers['Content-Type']).toBe('application/json');
     expect(JSON.parse(options.body)).toEqual({ name: 'Ada', phone: '+2348012345678' });
   });
+
+  describe('tenantId (superadmin)', () => {
+    it('appends ?tenantId= to a path with no existing query string', async () => {
+      const fetchMock = mockFetchOnce({ status: 200, json: [] });
+      const api = createApiClient({ tenantId: 'swift-logistics' });
+      await api.get('/api/contacts');
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/contacts?tenantId=swift-logistics', expect.anything());
+    });
+
+    it('does not append tenantId when none was configured', async () => {
+      const fetchMock = mockFetchOnce({ status: 200, json: [] });
+      const api = createApiClient();
+      await api.get('/api/contacts');
+
+      expect(fetchMock).toHaveBeenCalledWith('/api/contacts', expect.anything());
+    });
+  });
 });

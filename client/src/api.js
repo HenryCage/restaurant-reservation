@@ -5,15 +5,29 @@
 // "did my session expire?" branch.
 
 /**
- * @param {{ baseUrl?: string, onUnauthorized?: () => void }} [opts]
+ * @param {string} path
+ * @param {string} tenantId
+ * @returns {string}
  */
-export function createApiClient({ baseUrl = '', onUnauthorized } = {}) {
+function appendTenantId(path, tenantId) {
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}tenantId=${encodeURIComponent(tenantId)}`;
+}
+
+/**
+ * @param {{ baseUrl?: string, onUnauthorized?: () => void, tenantId?: string }} [opts]
+ */
+export function createApiClient({ baseUrl = '', onUnauthorized, tenantId } = {}) {
   /**
    * @param {string} path
    * @param {RequestInit} [options]
    */
   async function request(path, options = {}) {
-    const res = await fetch(`${baseUrl}${path}`, {
+    // Only relevant for a superadmin (a regular tenant user's requests are
+    // always scoped server-side to their own tenant regardless of this) --
+    // see resolveTenantId() in the backend's requireAuth middleware.
+    const resolvedPath = tenantId ? appendTenantId(path, tenantId) : path;
+    const res = await fetch(`${baseUrl}${resolvedPath}`, {
       ...options,
       credentials: 'include',
       headers: {

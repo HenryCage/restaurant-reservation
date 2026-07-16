@@ -32,6 +32,11 @@ describe('LoginScreen', () => {
     expect(await screen.findByText('invalid email or password')).toBeInTheDocument();
   });
 
+  it('renders an initialError notice (e.g. a session-expired message)', () => {
+    render(<LoginScreen api={makeApi()} onLogin={vi.fn()} initialError="Session expired, please log in again." />);
+    expect(screen.getByText('Session expired, please log in again.')).toBeInTheDocument();
+  });
+
   it('renders a rate-limit error message', async () => {
     const api = makeApi({ post: vi.fn().mockRejectedValue(new Error('too many attempts, try again later')) });
     render(<LoginScreen api={api} onLogin={vi.fn()} />);

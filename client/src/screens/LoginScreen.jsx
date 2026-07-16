@@ -2,13 +2,19 @@ import { useState } from 'react';
 import { XCircleIcon } from '@heroicons/react/24/outline';
 
 /**
- * @param {{ api: ReturnType<typeof import('../api.js').createApiClient>, onLogin: (me: object) => void }} props
+ * @param {{
+ *   api: ReturnType<typeof import('../api.js').createApiClient>,
+ *   onLogin: (me: object) => void,
+ *   initialError?: string|null,
+ * }} props
  */
-function LoginScreen({ api, onLogin }) {
+function LoginScreen({ api, onLogin, initialError = null }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+  // Reuses the same banner slot for an externally-supplied notice (e.g. "Session
+  // expired") as for a rejected login -- one visual pattern, not two.
+  const [error, setError] = useState(initialError);
 
   async function handleSubmit(e) {
     e.preventDefault();
