@@ -99,6 +99,41 @@ describe('TenantFormScreen', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
+  describe('Default Country Code field', () => {
+    it('defaults to "(use global default)" (empty) and submits empty when untouched', async () => {
+      const api = makeApi({ post: vi.fn().mockResolvedValue({ id: 'swift-logistics' }) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="create" tenant={null} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      expect(screen.getByLabelText('Default Country Code').value).toBe('');
+
+      fillCoreFields();
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.post).toHaveBeenCalledWith('/api/tenants', expect.objectContaining({ defaultCountryCode: '' }));
+    });
+
+    it('submits the selected override', async () => {
+      const api = makeApi({ post: vi.fn().mockResolvedValue({ id: 'swift-logistics' }) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="create" tenant={null} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      fillCoreFields();
+      fireEvent.change(screen.getByLabelText('Default Country Code'), { target: { value: '370' } });
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.post).toHaveBeenCalledWith('/api/tenants', expect.objectContaining({ defaultCountryCode: '370' }));
+    });
+
+    it('edit mode: prefills from the existing tenant', () => {
+      const tenant = { id: 'swift-logistics', defaultCountryCode: '370' };
+      render(<TenantFormScreen api={makeApi()} mode="edit" tenant={tenant} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      expect(screen.getByLabelText('Default Country Code').value).toBe('370');
+    });
+  });
+
   describe('SMS provider fields', () => {
     it('shows only the selected provider\'s fields', () => {
       render(<TenantFormScreen api={makeApi()} mode="create" tenant={null} onSaved={vi.fn()} onCancel={vi.fn()} />);

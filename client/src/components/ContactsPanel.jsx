@@ -1,24 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
+import { COUNTRY_CODES } from '../countryCodes.js';
 
 const POLL_INTERVAL_MS = 5000;
-
-// A phone typed without "+" is ambiguous without knowing which country it's
-// from -- normalisePhone/isValidE164 validate against this calling code, so
-// picking the wrong one here is exactly why e.g. a Lithuanian number typed
-// against the Nigeria default used to be rejected as invalid.
-const COUNTRY_CODES = [
-  { code: '234', label: 'Nigeria (+234)' },
-  { code: '370', label: 'Lithuania (+370)' },
-  { code: '44', label: 'United Kingdom (+44)' },
-  { code: '1', label: 'US / Canada (+1)' },
-  { code: '254', label: 'Kenya (+254)' },
-  { code: '233', label: 'Ghana (+233)' },
-  { code: '27', label: 'South Africa (+27)' },
-  { code: '353', label: 'Ireland (+353)' },
-  { code: '49', label: 'Germany (+49)' },
-  { code: '48', label: 'Poland (+48)' },
-];
 
 /**
  * @param {{ api: ReturnType<typeof import('../api.js').createApiClient> }} props

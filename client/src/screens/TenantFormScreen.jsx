@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { COUNTRY_CODES } from '../countryCodes.js';
 
 /** Builds the initial {status, template} rows from an existing tenant (edit mode). */
 function initialRows(tenant) {
@@ -63,6 +64,7 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
   const [channel, setChannel] = useState(tenant?.channel ?? 'dnd');
   const [testNumber, setTestNumber] = useState(tenant?.testNumber ?? '');
   const [syncContactsFromSheet, setSyncContactsFromSheet] = useState(tenant?.syncContactsFromSheet ?? false);
+  const [defaultCountryCode, setDefaultCountryCode] = useState(tenant?.defaultCountryCode ?? '');
   const [rows, setRows] = useState(initialRows(tenant));
   const [smsProvider, setSmsProvider] = useState(tenant?.smsProvider ?? '');
   const [credentials, setCredentials] = useState(() => initialCredentials(tenant?.smsProvider ?? '', tenant));
@@ -112,6 +114,7 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
       templates,
       smsProvider,
       smsCredentials: smsProvider === '' ? {} : credentials,
+      defaultCountryCode,
     };
 
     try {
@@ -206,6 +209,26 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
                 Sync contacts from sheet
               </label>
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="defaultCountryCode" className={labelClass}>Default Country Code</label>
+            <select
+              id="defaultCountryCode"
+              value={defaultCountryCode}
+              onChange={(e) => setDefaultCountryCode(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">(use global default)</option>
+              {COUNTRY_CODES.map((c) => (
+                <option key={c.code} value={c.code}>{c.label}</option>
+              ))}
+            </select>
+            <p className="text-xs text-slate-400">
+              Used only for a phone number written without a leading "+" (in this tenant's sheet, contacts, or
+              campaigns) -- a number that already has "+" is always read from its own prefix, regardless of this
+              setting.
+            </p>
           </div>
 
           <div className="space-y-3 pt-2 border-t border-slate-100">
