@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createTermiiAdapter, classifyTermiiError } from '../src/sms/termii.js';
 import { createAfricasTalkingAdapter, classifyAtRecipientStatus } from '../src/sms/africasTalking.js';
 import { createTwilioAdapter, classifyTwilioError } from '../src/sms/twilio.js';
-import { createSmsSender } from '../src/sms/index.js';
+import { createSmsSenderFactory } from '../src/sms/index.js';
 
 /** Build a fake fetch that returns a canned JSON response and records the call. */
 function fakeFetch({ ok = true, status = 200, json = {} } = {}) {
@@ -166,44 +166,71 @@ describe('Twilio adapter', () => {
   });
 });
 
-describe('createSmsSender (provider selector)', () => {
-  const termiiConfig = {
-    smsProvider: 'termii',
-    termii: { apiKey: 'K', baseUrl: 'https://x' },
-    africasTalking: { apiKey: '', username: '' },
-    twilio: { accountSid: '', authToken: '', fromNumber: '' },
-    httpTimeoutMs: 1000,
-  };
+describe('createSmsSenderFactory', () => {
+  const sharedConfig = { httpTimeoutMs: 1000 };
 
-  it('routes to the configured provider and normalises success', async () => {
+  function termiiTenant(over = {}) {
+    return { id: 'swift', smsProvider: 'termii', smsCredentials: { apiKey: 'K', baseUrl: 'https://x' }, ...over };
+  }
+
+  it('routes to the tenant\'s configured provider and normalises success', async () => {
     const fetchFn = fakeFetch({ json: { code: 'ok', message_id: 'm1' } });
-    const sendSms = createSmsSender(termiiConfig, { fetchFn });
+    const factory = createSmsSenderFactory({ config: sharedConfig, deps: { fetchFn } });
+    const sendSms = factory.forTenant(termiiTenant());
     const res = await sendSms('+2348012345678', 'hi', { senderId: 'S', channel: 'dnd' });
     expect(res).toEqual({ ok: true, providerMessageId: 'm1' });
   });
 
   it('converts an adapter throw into a transient failure', async () => {
-    const sendSms = createSmsSender(termiiConfig, {
-      fetchFn: async () => {
-        throw new Error('boom');
+    const factory = createSmsSenderFactory({
+      config: sharedConfig,
+      deps: {
+        fetchFn: async () => {
+          throw new Error('boom');
+        },
       },
     });
+    const sendSms = factory.forTenant(termiiTenant());
     const res = await sendSms('+2348012345678', 'hi', { senderId: 'S', channel: 'dnd' });
     expect(res.ok).toBe(false);
     expect(res.permanent).toBe(false);
   });
 
-  it('routes to Twilio when configured', async () => {
-    const twilioConfig = {
+  it('routes to Twilio when that tenant is configured for it', async () => {
+    const twilioTenant = {
+      id: 'other',
       smsProvider: 'twilio',
-      termii: { apiKey: '', baseUrl: '' },
-      africasTalking: { apiKey: '', username: '' },
-      twilio: { accountSid: 'ACxxxx', authToken: 'secret', fromNumber: '+15005550006' },
-      httpTimeoutMs: 1000,
+      smsCredentials: { accountSid: 'ACxxxx', authToken: 'secret', fromNumber: '+15005550006' },
     };
     const fetchFn = fakeFetch({ status: 201, json: { sid: 'SMxxxx' } });
-    const sendSms = createSmsSender(twilioConfig, { fetchFn });
+    const factory = createSmsSenderFactory({ config: sharedConfig, deps: { fetchFn } });
+    const sendSms = factory.forTenant(twilioTenant);
     const res = await sendSms('+2348012345678', 'hi', { senderId: 'S' });
     expect(res).toEqual({ ok: true, providerMessageId: 'SMxxxx' });
+  });
+
+  it('two tenants with different providers get independently correct adapters', async () => {
+    const fetchFn = fakeFetch({ json: { code: 'ok', message_id: 'm1' } });
+    const factory = createSmsSenderFactory({ config: sharedConfig, deps: { fetchFn } });
+    const termiiSend = factory.forTenant(termiiTenant({ id: 'a' }));
+    const atSend = factory.forTenant({
+      id: 'b',
+      smsProvider: 'africastalking',
+      smsCredentials: { apiKey: 'K2', username: 'sandbox' },
+    });
+
+    await termiiSend('+2348012345678', 'hi', { senderId: 'S' });
+    expect(fetchFn.calls[0].url).toBe('https://x/api/sms/send'); // termii tenant's own baseUrl
+
+    await atSend('+2348012345678', 'hi', { senderId: 'S' });
+    expect(fetchFn.calls[1].url).toContain('sandbox.africastalking.com'); // adapter-fixed host, unrelated to termii's baseUrl
+  });
+
+  it('returns a transient failure without throwing when the tenant has no provider configured', async () => {
+    const factory = createSmsSenderFactory({ config: sharedConfig, deps: { fetchFn: fakeFetch() } });
+    const sendSms = factory.forTenant({ id: 'unconfigured', smsProvider: '', smsCredentials: {} });
+    const res = await sendSms('+2348012345678', 'hi', { senderId: 'S' });
+    expect(res.ok).toBe(false);
+    expect(res.permanent).toBe(false);
   });
 });
