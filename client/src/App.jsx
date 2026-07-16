@@ -26,8 +26,20 @@ function App() {
 
   // Only a superadmin's requests need tenantId attached; recreated when the
   // chosen tenant changes (cheap -- just a closure factory, no side effects).
+  //
+  // baseUrl: empty (relative paths) in production, where server.js serves
+  // this SPA and the API from the same origin. In local dev, client/ runs
+  // on its own Vite server (a different origin/port from the backend), so
+  // relative fetches would hit Vite itself and 404 -- VITE_API_BASE_URL
+  // (set in client/.env, see client/.env.example) points them at the real
+  // backend instead.
   const api = useMemo(
-    () => createApiClient({ onUnauthorized: handleUnauthorized, tenantId: chosenTenantId ?? undefined }),
+    () =>
+      createApiClient({
+        baseUrl: import.meta.env.VITE_API_BASE_URL ?? '',
+        onUnauthorized: handleUnauthorized,
+        tenantId: chosenTenantId ?? undefined,
+      }),
     [handleUnauthorized, chosenTenantId],
   );
 
