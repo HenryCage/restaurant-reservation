@@ -26,7 +26,7 @@ export function baseTestConfig(overrides = {}) {
 }
 
 /**
- * @param {{ configOverrides?: object, now?: () => Date, registry?: object, sheets?: object }} [opts]
+ * @param {{ configOverrides?: object, now?: () => Date, registry?: object, sheets?: object, clientDistPath?: string }} [opts]
  */
 export async function startTestServer(opts = {}) {
   const db = createDb(':memory:');
@@ -36,7 +36,16 @@ export async function startTestServer(opts = {}) {
   const config = baseTestConfig(opts.configOverrides);
   const registry = opts.registry ?? { load: () => [] };
   const sheets = opts.sheets ?? { readOrders: async () => ({ ok: true, rows: [] }) };
-  const app = createHttpServer({ config, logger: silentLogger(), authStore, contactsStore, campaignsStore, registry, sheets });
+  const app = createHttpServer({
+    config,
+    logger: silentLogger(),
+    authStore,
+    contactsStore,
+    campaignsStore,
+    registry,
+    sheets,
+    ...(opts.clientDistPath ? { clientDistPath: opts.clientDistPath } : {}),
+  });
 
   const server = await new Promise((resolve) => {
     const s = app.listen(0, () => resolve(s));

@@ -4,6 +4,8 @@
 // rest of the codebase's create-then-caller-drives pattern (createProcessor,
 // createCampaignScheduler).
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import cors from 'cors';
 import { createAuthRoutes } from './routes/auth.js';
@@ -12,6 +14,9 @@ import { createCampaignsRoutes } from './routes/campaigns.js';
 import { createOrdersRoutes } from './routes/orders.js';
 import { createRateLimiter } from './rateLimiter.js';
 import { createRequireAuth } from './middleware/requireAuth.js';
+
+// src/http/server.js -> ../../client/dist
+const CLIENT_DIST_PATH = fileURLToPath(new URL('../../client/dist', import.meta.url));
 
 /**
  * @param {{
@@ -22,9 +27,19 @@ import { createRequireAuth } from './middleware/requireAuth.js';
  *   campaignsStore: ReturnType<typeof import('../campaigns.js').createCampaignsStore>,
  *   registry: { load: () => import('../tenants.js').Tenant[] },
  *   sheets: { readOrders: (sheetId: string, sheetName: string) => Promise<any> },
+ *   clientDistPath?: string,
  * }} deps
  */
-export function createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheets }) {
+export function createHttpServer({
+  config,
+  logger,
+  authStore,
+  contactsStore,
+  campaignsStore,
+  registry,
+  sheets,
+  clientDistPath = CLIENT_DIST_PATH,
+}) {
   const app = express();
   app.use(express.json());
   if (config.corsOrigin) {
@@ -43,6 +58,24 @@ export function createHttpServer({ config, logger, authStore, contactsStore, cam
   app.use('/api/contacts', createContactsRoutes({ requireAuth: apiRequireAuth, contactsStore }));
   app.use('/api/campaigns', createCampaignsRoutes({ requireAuth: apiRequireAuth, campaignsStore }));
   app.use('/api/orders', createOrdersRoutes({ requireAuth: apiRequireAuth, registry, sheets }));
+
+  if (config.isProduction) {
+    app.use(express.static(clientDistPath));
+    // A plain (unpathed) middleware, not a route pattern -- avoids any
+    // Express-version-specific wildcard/path-to-regexp syntax entirely.
+    // Only unmatched GETs outside /api and /auth fall through to the SPA
+    // shell; anything under those keeps getting the JSON 404 below (they
+    // already would have matched a real route above if one existed).
+    app.use((req, res, next) => {
+      if (req.method !== 'GET' || req.path.startsWith('/api') || req.path.startsWith('/auth')) {
+        next();
+        return;
+      }
+      res.sendFile(path.join(clientDistPath, 'index.html'), (err) => {
+        if (err) next(err);
+      });
+    });
+  }
 
   app.use((req, res) => {
     res.status(404).json({ error: 'not found' });
