@@ -1,11 +1,12 @@
 // config.js — parse and validate shared environment configuration (spec §6).
 //
-// Validation is fail-fast and provider-conditional: all problems are collected
-// and reported at once, so the operator fixes everything in one pass instead of
-// rediscovering errors one restart at a time. loadConfig() is pure (it reads
-// from a passed-in env object) so it is unit-testable without touching process.env.
-
-const VALID_PROVIDERS = new Set(['termii', 'africastalking', 'twilio']);
+// Validation is fail-fast: all problems are collected and reported at once,
+// so the operator fixes everything in one pass instead of rediscovering
+// errors one restart at a time. loadConfig() is pure (it reads from a
+// passed-in env object) so it is unit-testable without touching process.env.
+//
+// SMS provider + credentials are per-tenant (Per-tenant SMS provider spec),
+// not global -- there is no SMS_PROVIDER/TERMII_*/AT_*/TWILIO_* here anymore.
 
 /**
  * @param {string|undefined} value
@@ -74,35 +75,6 @@ export function loadConfig(env = process.env) {
     privateKey = privateKey.replace(/\\n/g, '\n');
   }
 
-  // SMS provider selection (provider-conditional requirements)
-  const smsProvider = (env.SMS_PROVIDER ?? 'termii').trim().toLowerCase();
-  if (!VALID_PROVIDERS.has(smsProvider)) {
-    errors.push(`SMS_PROVIDER must be one of: ${[...VALID_PROVIDERS].join(', ')} (got "${env.SMS_PROVIDER}")`);
-  }
-
-  const termii = { apiKey: (env.TERMII_API_KEY ?? '').trim(), baseUrl: (env.TERMII_BASE_URL ?? '').trim() };
-  const africasTalking = {
-    apiKey: (env.AT_API_KEY ?? '').trim(),
-    username: (env.AT_USERNAME ?? '').trim(),
-  };
-  const twilio = {
-    accountSid: (env.TWILIO_ACCOUNT_SID ?? '').trim(),
-    authToken: (env.TWILIO_AUTH_TOKEN ?? '').trim(),
-    fromNumber: (env.TWILIO_FROM_NUMBER ?? '').trim(),
-  };
-
-  if (smsProvider === 'termii') {
-    if (termii.apiKey === '') errors.push('TERMII_API_KEY is required when SMS_PROVIDER=termii');
-    if (termii.baseUrl === '') errors.push('TERMII_BASE_URL is required when SMS_PROVIDER=termii');
-  } else if (smsProvider === 'africastalking') {
-    if (africasTalking.apiKey === '') errors.push('AT_API_KEY is required when SMS_PROVIDER=africastalking');
-    if (africasTalking.username === '') errors.push('AT_USERNAME is required when SMS_PROVIDER=africastalking');
-  } else if (smsProvider === 'twilio') {
-    if (twilio.accountSid === '') errors.push('TWILIO_ACCOUNT_SID is required when SMS_PROVIDER=twilio');
-    if (twilio.authToken === '') errors.push('TWILIO_AUTH_TOKEN is required when SMS_PROVIDER=twilio');
-    if (twilio.fromNumber === '') errors.push('TWILIO_FROM_NUMBER is required when SMS_PROVIDER=twilio');
-  }
-
   const defaultCountryCode = (env.DEFAULT_COUNTRY_CODE ?? '234').replace(/\D/g, '') || '234';
 
   const pollIntervalSeconds = parseIntEnv(env, 'POLL_INTERVAL_SECONDS', 60, errors);
@@ -137,10 +109,6 @@ export function loadConfig(env = process.env) {
     nodeEnv,
     isProduction,
     google: Object.freeze({ serviceAccountEmail, privateKey }),
-    smsProvider,
-    termii: Object.freeze(termii),
-    africasTalking: Object.freeze(africasTalking),
-    twilio: Object.freeze(twilio),
     defaultCountryCode,
     pollIntervalSeconds,
     sendDelayMs,
@@ -169,11 +137,8 @@ export function loadConfig(env = process.env) {
  * @returns {string}
  */
 export function describeConfig(config) {
-  const sandbox = config.smsProvider === 'africastalking' && config.africasTalking.username === 'sandbox';
   const parts = [
     `mode=${config.nodeEnv}`,
-    `provider=${config.smsProvider}`,
-    `sandbox=${sandbox}`,
     `dry_run=${config.dryRun}`,
     `test_override=${config.testOverrideActive ? 'ON' : 'off'}`,
     `poll=${config.pollIntervalSeconds}s`,
