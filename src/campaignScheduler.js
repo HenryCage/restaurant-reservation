@@ -14,12 +14,12 @@ import { maskPhone } from './logger.js';
  *   logger: import('./logger.js').Logger,
  *   registry: { load: () => import('./tenants.js').Tenant[] },
  *   campaignsStore: ReturnType<typeof import('./campaigns.js').createCampaignsStore>,
- *   sendSms: (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }>,
+ *   smsSenderFactory: { forTenant: (tenant: import('./tenants.js').Tenant) => (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }> },
  *   now?: () => Date,
  * }} deps
  */
 export function createCampaignScheduler(deps) {
-  const { config, logger, registry, campaignsStore, sendSms } = deps;
+  const { config, logger, registry, campaignsStore, smsSenderFactory } = deps;
   const now = deps.now ?? (() => new Date());
 
   let running = false;
@@ -45,8 +45,9 @@ export function createCampaignScheduler(deps) {
    * @param {import('./logger.js').Logger} log
    * @param {any} campaign
    * @param {any} recipient
+   * @param {(to: string, message: string, opts: any) => Promise<any>} sendSms
    */
-  async function sendToRecipient(tenant, log, campaign, recipient) {
+  async function sendToRecipient(tenant, log, campaign, recipient, sendSms) {
     const contactE164 = normalisePhone(recipient.phone, config.defaultCountryCode) || recipient.phone;
     const to = resolveRecipient(tenant, contactE164);
 
@@ -93,6 +94,13 @@ export function createCampaignScheduler(deps) {
    */
   async function processTenantCampaigns(tenant, campaigns) {
     const log = logger.child(tenant.id);
+
+    if (tenant.smsProvider === '') {
+      log.warn('tenant has no SMS provider configured; skipping this tick\'s campaigns');
+      return;
+    }
+    const sendSms = smsSenderFactory.forTenant(tenant);
+
     for (const campaign of campaigns) {
       try {
         campaignsStore.ensureRecipients(campaign.id, tenant.id, campaign.sendTo);
@@ -113,7 +121,7 @@ export function createCampaignScheduler(deps) {
 
         for (const recipient of pending) {
           try {
-            await sendToRecipient(tenant, log, campaign, recipient);
+            await sendToRecipient(tenant, log, campaign, recipient, sendSms);
           } catch (err) {
             // Defensive: an unexpected throw on one recipient must not stop the others.
             log.error('unexpected error sending to recipient (isolated)', {

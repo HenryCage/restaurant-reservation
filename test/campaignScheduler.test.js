@@ -38,6 +38,8 @@ function rawTenant(over = {}) {
     notifyStatuses: ['x'],
     templates: { x: 'x' },
     testNumber: '',
+    smsProvider: 'termii',
+    smsCredentials: { apiKey: 'test-key', baseUrl: 'https://test.example' },
     ...over,
   };
 }
@@ -54,6 +56,11 @@ function makeSendSms(impl) {
   };
   fn.calls = calls;
   return fn;
+}
+
+/** Wraps a fake sendSms in the { forTenant(tenant) => sendSms } shape createCampaignScheduler now expects. */
+function makeSmsSenderFactory(sendSms) {
+  return { forTenant: () => sendSms };
 }
 
 const FIXED_NOW = () => new Date('2026-06-30T12:00:00.000Z');
@@ -82,7 +89,7 @@ describe('campaignScheduler — single-flight', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -114,7 +121,7 @@ describe('campaignScheduler — per-tenant isolation', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -141,12 +148,34 @@ describe('campaignScheduler — per-tenant isolation', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
     await scheduler.run();
     expect(sendSms.calls).toHaveLength(0);
+  });
+
+  it('skips a tenant with no SMS provider configured before even ensuring recipients', async () => {
+    const { contacts, campaignsStore, config } = makeHarness();
+    const tenants = buildTenants([rawTenant({ smsProvider: '', smsCredentials: {} })]);
+    contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+    const c = campaignsStore.createCampaign('t1', { name: 'P', message: 'hi', sendTo: 'all', scheduledTime: PAST });
+
+    const sendSms = makeSendSms();
+    const scheduler = createCampaignScheduler({
+      config,
+      logger: silentLogger(),
+      registry: makeRegistry(tenants),
+      campaignsStore,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
+      now: FIXED_NOW,
+    });
+
+    await scheduler.run();
+    expect(sendSms.calls).toHaveLength(0);
+    // The tenant is skipped before ensureRecipients() even runs -- nothing to retry later.
+    expect(campaignsStore.pendingRecipients(c.id, 10)).toHaveLength(0);
   });
 });
 
@@ -163,7 +192,7 @@ describe('campaignScheduler — send outcomes', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -186,7 +215,7 @@ describe('campaignScheduler — send outcomes', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -210,7 +239,7 @@ describe('campaignScheduler — send outcomes', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -231,7 +260,7 @@ describe('campaignScheduler — send outcomes', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -256,7 +285,7 @@ describe('campaignScheduler — bulk-edit guardrail', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 
@@ -286,7 +315,7 @@ describe('campaignScheduler — crash safety', () => {
       logger: silentLogger(),
       registry: makeRegistry(tenants),
       campaignsStore,
-      sendSms,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
 

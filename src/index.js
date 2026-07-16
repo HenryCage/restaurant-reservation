@@ -9,7 +9,7 @@ import { loadConfig, describeConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createTenantRegistry } from './tenants.js';
 import { createSheetsClient } from './sheets.js';
-import { createSmsSender } from './sms/index.js';
+import { createSmsSenderFactory } from './sms/index.js';
 import { createProcessor } from './processor.js';
 import { createDb } from './db.js';
 import { createContactsStore } from './contacts.js';
@@ -41,7 +41,7 @@ function main() {
   }
 
   const sheets = createSheetsClient(config);
-  const sendSms = createSmsSender(config);
+  const smsSenderFactory = createSmsSenderFactory({ config });
 
   // registry now depends on db (tenant config lives in SQLite, not a file --
   // see docs/superpowers/specs/2026-07-16-tenant-management-design.md), so
@@ -63,8 +63,8 @@ function main() {
     }
   }
 
-  const processor = createProcessor({ config, logger, registry, sheets, sendSms, onNotified });
-  const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, sendSms });
+  const processor = createProcessor({ config, logger, registry, sheets, smsSenderFactory, onNotified });
+  const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, smsSenderFactory });
 
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
   const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheets });

@@ -26,14 +26,14 @@ import { maskPhone } from './logger.js';
  *     readOrders: (sheetId: string, sheetName: string) => Promise<any>,
  *     writeRow: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string,number>, fields: object) => Promise<void>,
  *   },
- *   sendSms: (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }>,
+ *   smsSenderFactory: { forTenant: (tenant: import('./tenants.js').Tenant) => (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }> },
  *   onNotified?: (tenant: import('./tenants.js').Tenant, contact: { name: string, phone: string }) => void,
  *   now?: () => Date,
  *   sleep?: (ms: number) => Promise<void>,
  * }} deps
  */
 export function createProcessor(deps) {
-  const { config, logger, registry, sheets, sendSms, onNotified } = deps;
+  const { config, logger, registry, sheets, smsSenderFactory, onNotified } = deps;
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? ((ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()));
 
@@ -70,6 +70,12 @@ export function createProcessor(deps) {
       writeErrors: 0,
       capped: false,
     };
+
+    if (tenant.smsProvider === '') {
+      log.warn('tenant has no SMS provider configured; skipping this tick');
+      return summary;
+    }
+    const sendSms = smsSenderFactory.forTenant(tenant);
 
     const read = await sheets.readOrders(tenant.sheetId, tenant.sheetName);
     if (!read.ok) {
@@ -110,7 +116,7 @@ export function createProcessor(deps) {
 
     for (const { row, canonStatus, e164 } of toProcess) {
       try {
-        await processRow(tenant, log, colIndex, row, canonStatus, e164, summary);
+        await processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms);
       } catch (err) {
         // Defensive: an unexpected throw on one row must not stop later rows.
         log.error('unexpected error processing row (isolated)', {
@@ -139,8 +145,9 @@ export function createProcessor(deps) {
    * @param {string} canonStatus
    * @param {string} e164
    * @param {any} summary
+   * @param {(to: string, message: string, opts: any) => Promise<any>} sendSms
    */
-  async function processRow(tenant, log, colIndex, row, canonStatus, e164, summary) {
+  async function processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms) {
     const template = tenant.templatesByCanonical[canonStatus];
     const message = buildMessage(template, { name: row.name, orderId: row.orderId, amount: row.amount });
     const recipient = resolveRecipient(tenant, e164);
