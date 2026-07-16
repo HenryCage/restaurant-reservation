@@ -64,7 +64,7 @@ function main() {
   const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, sendSms });
 
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
-  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore });
+  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheets });
 
   // Fail loudly and exit so a supervisor can restart from a clean state.
   process.on('unhandledRejection', (reason) => {
