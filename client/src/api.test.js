@@ -63,6 +63,18 @@ describe('createApiClient', () => {
     expect(JSON.parse(options.body)).toEqual({ name: 'Ada', phone: '+2348012345678' });
   });
 
+  it('sends a JSON content-type and body for patch()', async () => {
+    const fetchMock = mockFetchOnce({ status: 200, json: { id: '1' } });
+    const api = createApiClient();
+    await api.patch('/api/tenants/swift-logistics', { name: 'Renamed' });
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/tenants/swift-logistics');
+    expect(options.method).toBe('PATCH');
+    expect(options.headers['Content-Type']).toBe('application/json');
+    expect(JSON.parse(options.body)).toEqual({ name: 'Renamed' });
+  });
+
   describe('tenantId (superadmin)', () => {
     it('appends ?tenantId= to a path with no existing query string', async () => {
       const fetchMock = mockFetchOnce({ status: 200, json: [] });

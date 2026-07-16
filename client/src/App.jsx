@@ -3,9 +3,11 @@ import { createApiClient } from './api.js';
 import LoginScreen from './screens/LoginScreen.jsx';
 import ChangePasswordScreen from './screens/ChangePasswordScreen.jsx';
 import TenantPickerScreen from './screens/TenantPickerScreen.jsx';
+import TenantManagementScreen from './screens/TenantManagementScreen.jsx';
 import DashboardScreen from './screens/DashboardScreen.jsx';
 
 // loading -> login -> (changePassword) -> (tenantPicker, superadmin only) -> dashboard
+//                                                    \-> tenantManagement (superadmin only) -/
 function App() {
   const [screen, setScreen] = useState('loading');
   const [sessionMessage, setSessionMessage] = useState(null);
@@ -93,6 +95,14 @@ function App() {
     setScreen('dashboard');
   }
 
+  function handleManageTenants() {
+    setScreen('tenantManagement');
+  }
+
+  function handleBackFromTenantManagement() {
+    setScreen('tenantPicker');
+  }
+
   async function handleLogout() {
     try {
       await api.post('/auth/logout', {});
@@ -118,7 +128,11 @@ function App() {
   }
 
   if (screen === 'tenantPicker') {
-    return <TenantPickerScreen onPick={handleTenantPicked} />;
+    return <TenantPickerScreen onPick={handleTenantPicked} onManageTenants={handleManageTenants} />;
+  }
+
+  if (screen === 'tenantManagement') {
+    return <TenantManagementScreen api={api} onBack={handleBackFromTenantManagement} />;
   }
 
   if (screen === 'dashboard') {

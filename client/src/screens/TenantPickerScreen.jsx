@@ -4,9 +4,9 @@ import { useState } from 'react';
  * Superadmin-only: chooses which tenant's data to view. The chosen id is
  * held in App.jsx's React state, not the URL (no client-side router) --
  * validity is confirmed implicitly by the dashboard's first real fetch.
- * @param {{ onPick: (tenantId: string) => void }} props
+ * @param {{ onPick: (tenantId: string) => void, onManageTenants: () => void }} props
  */
-function TenantPickerScreen({ onPick }) {
+function TenantPickerScreen({ onPick, onManageTenants }) {
   const [tenantId, setTenantId] = useState('');
 
   function handleSubmit(e) {
@@ -46,6 +46,14 @@ function TenantPickerScreen({ onPick }) {
             Continue
           </button>
         </form>
+
+        <button
+          type="button"
+          onClick={onManageTenants}
+          className="w-full text-center text-sm font-bold text-slate-500 hover:text-slate-900"
+        >
+          Manage tenants →
+        </button>
       </div>
     </div>
   );

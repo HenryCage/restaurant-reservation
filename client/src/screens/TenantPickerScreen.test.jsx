@@ -25,4 +25,13 @@ describe('TenantPickerScreen', () => {
 
     expect(onPick).not.toHaveBeenCalled();
   });
+
+  it('calls onManageTenants when the "Manage tenants" link is clicked', () => {
+    const onManageTenants = vi.fn();
+    render(<TenantPickerScreen onPick={vi.fn()} onManageTenants={onManageTenants} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /manage tenants/i }));
+
+    expect(onManageTenants).toHaveBeenCalledTimes(1);
+  });
 });
