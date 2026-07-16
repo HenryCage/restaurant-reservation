@@ -59,16 +59,17 @@ function main() {
     return fail(err?.message ?? String(err));
   }
 
+  const db = createDb(config.dbPath);
+
   if (tenantId) {
     const logger = createLogger({ level: 'error' });
-    const registry = createTenantRegistry({ filePath: config.tenantsFile, logger });
+    const registry = createTenantRegistry({ db, logger });
     const knownActiveTenant = registry.load().some((t) => t.id === tenantId);
     if (!knownActiveTenant) {
-      return fail(`tenant "${tenantId}" is not a known active tenant in ${config.tenantsFile}`);
+      return fail(`tenant "${tenantId}" is not a known active tenant`);
     }
   }
 
-  const db = createDb(config.dbPath);
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
 
   let user;

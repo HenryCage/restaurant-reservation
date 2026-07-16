@@ -40,11 +40,14 @@ function main() {
     logger.warn('GLOBAL_TEST_NUMBER is set but IGNORED because NODE_ENV=production');
   }
 
-  const registry = createTenantRegistry({ filePath: config.tenantsFile, logger });
   const sheets = createSheetsClient(config);
   const sendSms = createSmsSender(config);
 
+  // registry now depends on db (tenant config lives in SQLite, not a file --
+  // see docs/superpowers/specs/2026-07-16-tenant-management-design.md), so
+  // db must be created first.
   const db = createDb(config.dbPath);
+  const registry = createTenantRegistry({ db, logger });
   const contactsStore = createContactsStore(db, { defaultCountryCode: config.defaultCountryCode });
   const campaignsStore = createCampaignsStore(db);
 

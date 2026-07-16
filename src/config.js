@@ -122,7 +122,6 @@ export function loadConfig(env = process.env) {
   const loginRateLimitMax = parseIntEnv(env, 'LOGIN_RATE_LIMIT_MAX', 10, errors);
   const loginRateLimitWindowMinutes = parseIntEnv(env, 'LOGIN_RATE_LIMIT_WINDOW_MINUTES', 15, errors);
 
-  const tenantsFile = (env.TENANTS_FILE ?? './tenants.json').trim() || './tenants.json';
   const dryRun = parseBool(env.DRY_RUN, false);
 
   const globalTestNumber = (env.GLOBAL_TEST_NUMBER ?? '').trim();
@@ -155,7 +154,6 @@ export function loadConfig(env = process.env) {
     corsOrigin,
     loginRateLimitMax,
     loginRateLimitWindowMinutes,
-    tenantsFile,
     dryRun,
     globalTestNumber,
     /** recipient override actually in effect (empty unless honored) */
