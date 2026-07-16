@@ -1,7 +1,8 @@
 # Tenant management (superadmin console, part 1 of 2)
 
 Date: 2026-07-16
-Status: approved (design), not yet implemented
+Status: implemented (see docs/superpowers/plans/2026-07-16-tenant-management-plan.md
+for the step-by-step commit history and the live browser smoke-test results).
 Depends on: sub-projects 1-3 (Foundation merge, Customer-facing auth + HTTP API,
 Dashboard UI), all implemented. Sibling sub-project: user management (part 2 of
 2, to be brainstormed separately after this one is implemented).

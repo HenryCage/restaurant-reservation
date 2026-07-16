@@ -1,7 +1,14 @@
 # Implementation plan: Tenant management (superadmin console, part 1 of 2)
 
 Spec: `docs/superpowers/specs/2026-07-16-tenant-management-design.md`
-Status: not started
+Status: implemented and committed (all 9 steps). Step 9's live browser
+walkthrough (Playwright, production build, migrated scratch tenants) passed
+12/12 real checks (two apparent failures during the run were test-script
+bugs -- case-sensitivity and a wrong fixture assumption -- not app bugs,
+confirmed via screenshots) and caught one real bug: a stray dev-only
+client/.env leaking VITE_API_BASE_URL into production builds, fixed by
+renaming the convention to client/.env.development (Vite's mode-scoped
+loading).
 
 ## Sequencing rationale
 
