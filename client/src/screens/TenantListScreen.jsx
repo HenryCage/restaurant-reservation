@@ -6,15 +6,20 @@ const STATUS_STYLE = {
 };
 
 /**
+ * The superadmin's landing screen: a real list to click into, replacing the
+ * earlier blind "type a tenant id" picker.
  * @param {{
  *   api: ReturnType<typeof import('../api.js').createApiClient>,
  *   refreshKey?: number,
  *   onEdit: (tenant: object) => void,
  *   onCreate: () => void,
- *   onBack: () => void,
+ *   onViewDashboard: (tenantId: string) => void,
+ *   onManageUsers: (tenantId: string) => void,
+ *   onManageSuperadmins: () => void,
+ *   onLogout: () => void,
  * }} props
  */
-function TenantListScreen({ api, refreshKey, onEdit, onCreate, onBack }) {
+function TenantListScreen({ api, refreshKey, onEdit, onCreate, onViewDashboard, onManageUsers, onManageSuperadmins, onLogout }) {
   const [tenants, setTenants] = useState(null); // null = not loaded yet
   const [error, setError] = useState(null);
 
@@ -41,11 +46,20 @@ function TenantListScreen({ api, refreshKey, onEdit, onCreate, onBack }) {
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-3xl font-black text-slate-900 tracking-tight">Tenants</h1>
-            <p className="text-sm text-slate-500 font-medium">Manage tenant configuration.</p>
+            <p className="text-sm text-slate-500 font-medium">Superadmin console.</p>
           </div>
-          <button type="button" onClick={onBack} className="text-sm font-bold text-slate-500 hover:text-slate-900">
-            ← Back
-          </button>
+          <div className="flex items-center gap-4">
+            <button
+              type="button"
+              onClick={onManageSuperadmins}
+              className="text-sm font-bold text-slate-500 hover:text-slate-900"
+            >
+              Manage superadmins →
+            </button>
+            <button type="button" onClick={onLogout} className="text-sm font-bold text-slate-500 hover:text-slate-900">
+              Log out
+            </button>
+          </div>
         </div>
 
         {error && (
@@ -92,7 +106,21 @@ function TenantListScreen({ api, refreshKey, onEdit, onCreate, onBack }) {
                         </span>
                       </td>
                       <td className="py-3 text-slate-500 font-mono text-xs">{t.sheetId}</td>
-                      <td className="py-3 text-right">
+                      <td className="py-3 text-right space-x-3">
+                        <button
+                          type="button"
+                          onClick={() => onViewDashboard(t.id)}
+                          className="text-sm font-bold text-slate-600 hover:text-slate-900"
+                        >
+                          Dashboard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onManageUsers(t.id)}
+                          className="text-sm font-bold text-slate-600 hover:text-slate-900"
+                        >
+                          Users
+                        </button>
                         <button
                           type="button"
                           onClick={() => onEdit(t)}

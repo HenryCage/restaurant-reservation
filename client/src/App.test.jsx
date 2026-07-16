@@ -23,10 +23,13 @@ describe('App — auth state machine driven by GET /auth/me', () => {
     expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
   });
 
-  it('renders TenantPickerScreen for a superadmin with no tenant chosen yet', async () => {
-    global.fetch.mockResolvedValue(jsonResponse(200, { mustChangePassword: false, tenantId: null, isSuperadmin: true }));
+  it('renders the tenant list (superadmin home) for a superadmin with no tenant chosen yet', async () => {
+    global.fetch.mockImplementation(async (url) => {
+      if (url === '/auth/me') return jsonResponse(200, { mustChangePassword: false, tenantId: null, isSuperadmin: true });
+      return jsonResponse(200, []); // TenantListScreen's own /api/tenants fetch
+    });
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Choose a tenant' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Tenants' })).toBeInTheDocument();
   });
 
   it('renders DashboardScreen for a normal, non-gated tenant user', async () => {

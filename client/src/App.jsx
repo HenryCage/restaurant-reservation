@@ -2,18 +2,17 @@ import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { createApiClient } from './api.js';
 import LoginScreen from './screens/LoginScreen.jsx';
 import ChangePasswordScreen from './screens/ChangePasswordScreen.jsx';
-import TenantPickerScreen from './screens/TenantPickerScreen.jsx';
 import TenantManagementScreen from './screens/TenantManagementScreen.jsx';
 import UserManagementScreen from './screens/UserManagementScreen.jsx';
 import DashboardScreen from './screens/DashboardScreen.jsx';
 
-// loading -> login -> (changePassword) -> (tenantPicker, superadmin only) -> dashboard
-//                                                    \-> tenantManagement (superadmin only) -/
+// loading -> login -> (changePassword) -> (tenantManagement, superadmin only -- the tenant list is their home) -> dashboard
 //                                                    \-> userManagement (superadmin only) -/
 function App() {
   const [screen, setScreen] = useState('loading');
   const [sessionMessage, setSessionMessage] = useState(null);
   const [chosenTenantId, setChosenTenantId] = useState(null);
+  const [isSuperadmin, setIsSuperadmin] = useState(false);
   const [userManagementScope, setUserManagementScope] = useState(null);
   // Distinguishes "never logged in" (first /auth/me check, 401 is normal --
   // no notice) from "was logged in, session died" (401 later -- show the
@@ -50,10 +49,11 @@ function App() {
 
   const routeFromMe = useCallback(
     (me) => {
+      setIsSuperadmin(me.isSuperadmin);
       if (me.mustChangePassword) {
         setScreen('changePassword');
       } else if (me.isSuperadmin && !chosenTenantId) {
-        setScreen('tenantPicker');
+        setScreen('tenantManagement');
       } else {
         setScreen('dashboard');
       }
@@ -93,17 +93,14 @@ function App() {
     routeFromMe(me);
   }
 
-  function handleTenantPicked(tenantId) {
+  function handleViewDashboard(tenantId) {
     setChosenTenantId(tenantId);
     setScreen('dashboard');
   }
 
-  function handleManageTenants() {
+  function handleBackToTenants() {
+    setChosenTenantId(null);
     setScreen('tenantManagement');
-  }
-
-  function handleBackFromTenantManagement() {
-    setScreen('tenantPicker');
   }
 
   function handleManageUsers(tenantId) {
@@ -118,7 +115,7 @@ function App() {
 
   function handleBackFromUserManagement() {
     setUserManagementScope(null);
-    setScreen('tenantPicker');
+    setScreen('tenantManagement');
   }
 
   async function handleLogout() {
@@ -145,19 +142,16 @@ function App() {
     return <ChangePasswordScreen api={api} onChanged={handlePasswordChanged} />;
   }
 
-  if (screen === 'tenantPicker') {
+  if (screen === 'tenantManagement') {
     return (
-      <TenantPickerScreen
-        onPick={handleTenantPicked}
-        onManageTenants={handleManageTenants}
+      <TenantManagementScreen
+        api={api}
+        onViewDashboard={handleViewDashboard}
         onManageUsers={handleManageUsers}
         onManageSuperadmins={handleManageSuperadmins}
+        onLogout={handleLogout}
       />
     );
-  }
-
-  if (screen === 'tenantManagement') {
-    return <TenantManagementScreen api={api} onBack={handleBackFromTenantManagement} />;
   }
 
   if (screen === 'userManagement') {
@@ -165,7 +159,13 @@ function App() {
   }
 
   if (screen === 'dashboard') {
-    return <DashboardScreen api={api} onLogout={handleLogout} />;
+    return (
+      <DashboardScreen
+        api={api}
+        onLogout={handleLogout}
+        onBackToTenants={isSuperadmin ? handleBackToTenants : undefined}
+      />
+    );
   }
 
   return <LoginScreen api={api} onLogin={handleLogin} initialError={sessionMessage} />;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import DashboardScreen from './DashboardScreen.jsx';
 
 function makeApi({ contacts = [], campaigns = [], orders = [], failContacts = false } = {}) {
@@ -39,5 +39,19 @@ describe('DashboardScreen', () => {
 
     expect(await screen.findByText('backend unavailable')).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'New campaign' })).not.toBeInTheDocument();
+  });
+
+  it('does not render a "Tenants" link when onBackToTenants is not given (regular tenant user)', async () => {
+    render(<DashboardScreen api={makeApi()} onLogout={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'SMS Dispatch' });
+    expect(screen.queryByRole('button', { name: /tenants/i })).not.toBeInTheDocument();
+  });
+
+  it('renders a "Tenants" link and calls onBackToTenants when given (superadmin viewing a tenant)', async () => {
+    const onBackToTenants = vi.fn();
+    render(<DashboardScreen api={makeApi()} onLogout={vi.fn()} onBackToTenants={onBackToTenants} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /tenants/i }));
+    expect(onBackToTenants).toHaveBeenCalledTimes(1);
   });
 });
