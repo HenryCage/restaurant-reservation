@@ -46,6 +46,19 @@ describe('GET/POST /api/contacts', () => {
     expect(list[0].name).toBe('Ada');
   });
 
+  it('creates a contact using a countryCode other than the server default', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const createRes = await fetch(`${ctx.baseUrl}/api/contacts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'Rimas', phone: '60012345', countryCode: '370' }),
+    });
+    expect(createRes.status).toBe(201);
+    expect((await createRes.json()).phone).toBe('+37060012345');
+  });
+
   it('cannot see another tenant\'s contacts by spoofing ?tenantId=', async () => {
     ctx = await startTestServer();
     ctx.contactsStore.createContact('t2', { name: 'Other tenant contact', phone: '+2348023456789' });

@@ -36,6 +36,27 @@ describe('createContactsStore', () => {
       const c = store.createContact('t2', { name: 'Ada', phone: '+2348012345678' });
       expect(c.tenantId).toBe('t2');
     });
+
+    it('uses the per-call countryCode override instead of the store default', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Rimas', phone: '60012345', countryCode: '370' });
+      expect(c.phone).toBe('+37060012345');
+    });
+
+    it('validates a "+"-prefixed number against the overridden countryCode, not the default', () => {
+      const store = makeStore();
+      // Without the override this would be rejected: isValidE164 checks the
+      // number starts with "+234" by default, not whatever country the "+"
+      // number actually claims to be from.
+      const c = store.createContact('t1', { name: 'Rimas', phone: '+37060012345', countryCode: '370' });
+      expect(c.phone).toBe('+37060012345');
+    });
+
+    it('falls back to the store default when countryCode is omitted', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '08012345678' });
+      expect(c.phone).toBe('+2348012345678');
+    });
   });
 
   describe('upsertContact', () => {

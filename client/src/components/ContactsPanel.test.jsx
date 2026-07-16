@@ -31,7 +31,32 @@ describe('ContactsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /add contact/i }));
 
     expect(await screen.findByText('Ada')).toBeInTheDocument();
-    expect(api.post).toHaveBeenCalledWith('/api/contacts', { name: 'Ada', phone: '+2348012345678', tags: [] });
+    expect(api.post).toHaveBeenCalledWith('/api/contacts', {
+      name: 'Ada',
+      phone: '+2348012345678',
+      countryCode: '234',
+      tags: [],
+    });
+  });
+
+  it('submits the selected country code', async () => {
+    const api = makeApi({ post: vi.fn().mockResolvedValue({ id: '1', name: 'Rimas', phone: '+37060012345' }) });
+    render(<ContactsPanel api={api} />);
+    await waitFor(() => expect(api.get).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Rimas' } });
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: '370' } });
+    fireEvent.change(screen.getByLabelText('Phone'), { target: { value: '60012345' } });
+    fireEvent.click(screen.getByRole('button', { name: /add contact/i }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/contacts', {
+        name: 'Rimas',
+        phone: '60012345',
+        countryCode: '370',
+        tags: [],
+      }),
+    );
   });
 
   it("shows the server's error message on a failed add", async () => {

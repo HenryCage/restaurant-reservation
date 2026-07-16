@@ -54,11 +54,11 @@ export function createContactsStore(db, deps = {}) {
     /**
      * Human-facing add: rejects an existing (tenant, phone) with a clear error.
      * @param {string} tenantId
-     * @param {{ name: string, phone: string, tags?: string[] }} input
-     * @returns {Contact}
+     * @param {{ name: string, phone: string, tags?: string[], countryCode?: string }} input
      */
-    createContact(tenantId, { name, phone, tags = [] }) {
-      const e164 = normalisePhone(phone, defaultCountryCode);
+    createContact(tenantId, { name, phone, tags = [], countryCode }) {
+      const cc = typeof countryCode === 'string' && countryCode.trim() !== '' ? countryCode : defaultCountryCode;
+      const e164 = normalisePhone(phone, cc);
       if (!e164) throw new Error(`invalid phone: ${phone}`);
 
       if (findByPhoneStmt.get(tenantId, e164)) {

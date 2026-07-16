@@ -27,9 +27,9 @@ export function createContactsRoutes({ requireAuth, contactsStore }) {
       res.status(400).json({ error: 'tenantId is required' });
       return;
     }
-    const { name, phone, tags } = req.body ?? {};
+    const { name, phone, tags, countryCode } = req.body ?? {};
     try {
-      const contact = contactsStore.createContact(resolved.tenantId, { name, phone, tags });
+      const contact = contactsStore.createContact(resolved.tenantId, { name, phone, tags, countryCode });
       res.status(201).json(contact);
     } catch (err) {
       res.status(400).json({ error: err?.message ?? String(err) });

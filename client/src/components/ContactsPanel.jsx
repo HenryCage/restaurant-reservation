@@ -3,6 +3,23 @@ import { CheckCircleIcon, XCircleIcon } from '@heroicons/react/24/outline';
 
 const POLL_INTERVAL_MS = 5000;
 
+// A phone typed without "+" is ambiguous without knowing which country it's
+// from -- normalisePhone/isValidE164 validate against this calling code, so
+// picking the wrong one here is exactly why e.g. a Lithuanian number typed
+// against the Nigeria default used to be rejected as invalid.
+const COUNTRY_CODES = [
+  { code: '234', label: 'Nigeria (+234)' },
+  { code: '370', label: 'Lithuania (+370)' },
+  { code: '44', label: 'United Kingdom (+44)' },
+  { code: '1', label: 'US / Canada (+1)' },
+  { code: '254', label: 'Kenya (+254)' },
+  { code: '233', label: 'Ghana (+233)' },
+  { code: '27', label: 'South Africa (+27)' },
+  { code: '353', label: 'Ireland (+353)' },
+  { code: '49', label: 'Germany (+49)' },
+  { code: '48', label: 'Poland (+48)' },
+];
+
 /**
  * @param {{ api: ReturnType<typeof import('../api.js').createApiClient> }} props
  */
@@ -10,6 +27,7 @@ function ContactsPanel({ api }) {
   const [contacts, setContacts] = useState([]);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  const [countryCode, setCountryCode] = useState('234');
   const [tags, setTags] = useState('');
   const [status, setStatus] = useState(null);
 
@@ -36,6 +54,7 @@ function ContactsPanel({ api }) {
       await api.post('/api/contacts', {
         name,
         phone,
+        countryCode,
         tags: tags
           ? tags.split(',').map((t) => t.trim()).filter(Boolean)
           : [],
@@ -81,15 +100,27 @@ function ContactsPanel({ api }) {
           required
           className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-all placeholder:text-slate-400"
         />
-        <input
-          type="tel"
-          placeholder="+2348012345678"
-          aria-label="Phone"
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          required
-          className="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-all placeholder:text-slate-400 font-mono"
-        />
+        <div className="flex gap-2">
+          <select
+            aria-label="Country"
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            className="border border-slate-200 rounded-xl px-2 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-all"
+          >
+            {COUNTRY_CODES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </select>
+          <input
+            type="tel"
+            placeholder="8012345678"
+            aria-label="Phone"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            required
+            className="flex-1 min-w-0 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 transition-all placeholder:text-slate-400 font-mono"
+          />
+        </div>
         <input
           type="text"
           placeholder="tags, optional"
