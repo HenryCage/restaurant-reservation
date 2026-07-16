@@ -1,4 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createDb } from '../src/db.js';
 
 describe('createDb', () => {
@@ -38,7 +41,10 @@ describe('createDb', () => {
     db.prepare(
       'INSERT INTO users (id, tenant_id, email, password_hash, is_superadmin, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
     ).run('u1', 't1', 'a@example.com', 'scrypt:aa:bb', 0, 1, '2026-01-01T00:00:00.000Z');
-    expect(db.prepare('SELECT * FROM users WHERE id = ?').get('u1')).toMatchObject({ email: 'a@example.com' });
+    expect(db.prepare('SELECT * FROM users WHERE id = ?').get('u1')).toMatchObject({
+      email: 'a@example.com',
+      active: 1,
+    });
 
     db.prepare('INSERT INTO sessions (id, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
       's1',
@@ -71,6 +77,41 @@ describe('createDb', () => {
     );
     const row = db.prepare('SELECT * FROM tenants WHERE id = ?').get('swift-logistics');
     expect(row).toMatchObject({ name: 'Swift Logistics', active: 1, sender_id: 'SwiftLog' });
+  });
+
+  describe('users.active self-healing column', () => {
+    let dir;
+
+    afterEach(() => {
+      // maxRetries/retryDelay: better-sqlite3's file handle (plus WAL/SHM
+      // sidecar files) can take a moment to release on Windows after close().
+      if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      dir = undefined;
+    });
+
+    it('reopening the same file-backed database does not throw and preserves data', () => {
+      dir = mkdtempSync(join(tmpdir(), 'sms-dispatch-db-test-'));
+      const dbPath = join(dir, 'platform.db');
+
+      const db1 = createDb(dbPath);
+      db1.prepare(
+        'INSERT INTO users (id, tenant_id, email, password_hash, is_superadmin, must_change_password, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      ).run('u1', 't1', 'a@example.com', 'scrypt:aa:bb', 0, 1, '2026-01-01T00:00:00.000Z');
+      db1.close();
+
+      // Second open on the same file: `active` already exists here, so this
+      // exercises the "column already present -> skip the ALTER" branch --
+      // an unconditional ALTER would throw "duplicate column name".
+      let db2;
+      expect(() => {
+        db2 = createDb(dbPath);
+      }).not.toThrow();
+      expect(db2.prepare('SELECT * FROM users WHERE id = ?').get('u1')).toMatchObject({
+        email: 'a@example.com',
+        active: 1,
+      });
+      db2.close();
+    });
   });
 
   it('enforces UNIQUE(email) on users', () => {

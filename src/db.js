@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS tenants (
 `;
 
 /**
+ * `users.active` is deliberately not in the CREATE TABLE literal above:
+ * `users` already exists in every deployed database, so the literal alone
+ * can't retroactively add a column to it. This self-healing step runs on
+ * every open (fresh or pre-existing) and is the only place the column is
+ * added, guarded so a second open of the same file never re-runs the ALTER.
+ * @param {import('better-sqlite3').Database} db
+ */
+function ensureUsersActiveColumn(db) {
+  const hasActive = db.prepare('PRAGMA table_info(users)').all().some((col) => col.name === 'active');
+  if (!hasActive) db.exec('ALTER TABLE users ADD COLUMN active INTEGER NOT NULL DEFAULT 1');
+}
+
+/**
  * Open (or create) the SQLite database and ensure the schema exists.
  * @param {string} path - filesystem path, or ':memory:' for tests.
  * @returns {import('better-sqlite3').Database}
@@ -88,5 +101,6 @@ export function createDb(path) {
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);
+  ensureUsersActiveColumn(db);
   return db;
 }
