@@ -49,13 +49,20 @@ This spec covers only (1).
 - Campaign targeting is restricted to **saved contacts only** (`all` or one
   `contact.id`) — no ad-hoc, not-yet-saved phone numbers, to avoid a second
   validation path and keep `campaign_recipients` cleanly tied to `contacts`.
+- Contacts are also populated automatically from the sheet: whenever a
+  sheet-triggered SMS is sent successfully, that customer is upserted into
+  `contacts` for that tenant. This is **opt-in per tenant** (a tenant whose
+  transactional order data shouldn't feed a contactable list stays unaffected)
+  and only fires for customers who were actually messaged — not every row in the
+  sheet. See "Sheet → contacts sync" below.
 
 ## Architecture
 
 New code is an **additive layer**, not a modification of the existing engine.
-`processor.js` (sheet→SMS) is untouched — its single-flight and per-tenant
-isolation guarantees stay exactly as they are. A sibling scheduler for campaigns
-follows the same discipline independently.
+`processor.js`'s single-flight and per-tenant isolation guarantees stay exactly as
+they are; it gains exactly one small, optional extension point (the contacts-sync
+hook below), no other change to its control flow. A sibling scheduler for
+campaigns follows the same discipline independently.
 
 ```
 src/
@@ -66,7 +73,9 @@ src/
   sms/
     twilio.js                # new: third adapter, same {ok, providerMessageId?, error?, permanent?} contract
     index.js                  # modified: createSmsSender() gains a 'twilio' case
-  tenants.js, processor.js, sheets.js, message.js, phone.js, config.js, logger.js  # untouched
+  processor.js               # modified (minimal): optional deps.onNotified(tenant, contact) hook, see below
+  tenants.js                 # modified (minimal): new optional per-tenant field syncContactsFromSheet
+  sheets.js, message.js, phone.js, config.js, logger.js   # untouched
 ```
 
 `src/index.js` starts two independent `setInterval` loops in the same process:
@@ -164,6 +173,43 @@ numeric `code` field distinguishes permanent (e.g. 21211 invalid `To` number) fr
 transient (429/5xx/auth/network); default is transient when unsure, same rule as
 the existing adapters.
 
+### Sheet → contacts sync (opt-in)
+
+A tenant can opt in to automatically populating its `contacts` list from the
+customers its sheet-driven engine actually messages — so campaigns have a
+contact list to send to without anyone re-typing customer data by hand.
+
+- **New tenant field** (`tenants.js`, `tenants.example.json`):
+  `syncContactsFromSheet: boolean`, default `false` when absent. Parsed and
+  validated alongside the other optional per-tenant settings (`channel`,
+  `testNumber`); no new required field, existing `tenants.json` files keep
+  working unchanged.
+- **Trigger point**: inside `processor.js`'s `processRow()`, only in the branch
+  where `result.ok === true` (a message was actually, successfully sent) —
+  never for transient/permanent failures, and never while `config.dryRun` is
+  true (dry runs mark rows as notified without a real send; they must not
+  populate a real contact list). The synced phone is `e164` (the validated
+  customer number), never the test-number-overridden `recipient` — so
+  `GLOBAL_TEST_NUMBER`/`testNumber` redirection never leaks a test number into
+  a tenant's contacts.
+- **Extension point**: `createProcessor(deps)` gains one new optional
+  dependency, `deps.onNotified?: (tenant, contact: {name, phone}) => void`.
+  When absent (as in every existing test), behavior is byte-for-byte identical
+  to today. When present, it's called once per successful send, wrapped in its
+  own try/catch so a contacts-sync failure is logged and isolated — it can
+  never turn a successful sheet notification into a failed tick.
+- **Wiring** (`index.js`, the composition root): `onNotified` is defined once,
+  checks `tenant.syncContactsFromSheet` itself, and calls
+  `contactsStore.upsertContact(tenant.id, { name, phone })` — so `processor.js`
+  itself never needs to know the opt-in flag exists, keeping its dependency
+  surface (and its existing tests) unchanged.
+- **Upsert semantics**: `contacts.js` gains `upsertContact(tenantId, {name,
+  phone})` (`INSERT ... ON CONFLICT(tenant_id, phone) DO UPDATE SET name =
+  excluded.name`), distinct from the human-facing `createContact` (used by a
+  future dashboard "add contact" action), which instead rejects an existing
+  phone with a clear error. Auto-sync is idempotent and silent by design; a
+  manual add is an explicit user action that should surface a duplicate.
+
 ## Error handling & safety modes
 
 Transient vs. permanent semantics for campaign sends are identical to
@@ -199,6 +245,14 @@ rest of `loadConfig`:
   per-tenant isolation, and crash-safety at the per-recipient level.
 - `sms/twilio.test.js` — mirrors `termii.test.js` / `africasTalking.test.js`:
   injected fake `fetch`, verifies permanent/transient error classification.
+- `contacts.test.js` also covers `upsertContact` (insert new, update name on
+  existing phone, isolated per `tenant_id`).
+- `processor.test.js` gains cases for the new `onNotified` hook: called with
+  `(tenant, {name, phone})` only on a successful, non-dry-run send; not called
+  on transient/permanent failure or during `DRY_RUN`; a throwing `onNotified`
+  does not fail the row or the tick; omitting it entirely leaves all existing
+  assertions passing unchanged.
+- `tenants.test.js` gains a case for parsing/defaulting `syncContactsFromSheet`.
 
 ## Deployment
 
