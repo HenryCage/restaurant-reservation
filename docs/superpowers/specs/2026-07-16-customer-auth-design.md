@@ -1,7 +1,8 @@
 # Customer-facing auth + HTTP API
 
 Date: 2026-07-16
-Status: approved (design), not yet implemented
+Status: implemented (see docs/superpowers/plans/2026-07-16-customer-auth-plan.md
+for the step-by-step commit history and the live smoke-test results).
 Sub-project: 2 of 4 (see `docs/superpowers/specs/2026-07-16-foundation-merge-design.md`
 Context section for the full list). Depends on sub-project 1 (Foundation merge),
 which is implemented. Sub-project 3 (dashboard UI) depends on this one.

@@ -1,7 +1,11 @@
 # Implementation plan: Customer-facing auth + HTTP API
 
 Spec: `docs/superpowers/specs/2026-07-16-customer-auth-design.md`
-Status: not started
+Status: implemented and committed (steps 1-9), step 10's manual smoke check
+run live against a real server with scratch/fake credentials (login,
+must_change_password gate, change-password, logout, contact create/list,
+superadmin ?tenantId= requirement all verified over real HTTP) -- artifacts
+cleaned up afterward, nothing committed for step 10 itself.
 
 ## Sequencing rationale
 
