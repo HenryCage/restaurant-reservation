@@ -23,6 +23,20 @@ const SENDER_ID_RE = /^[A-Za-z0-9]{3,11}$/;
 const DEFAULT_SHEET_NAME = 'Orders';
 const DEFAULT_CHANNEL = 'dnd';
 
+// Per-tenant SMS provider spec: each provider's required smsCredentials
+// fields, and (separately) which one of those fields is the genuinely
+// secret one that gets masked in HTTP responses.
+const PROVIDER_REQUIRED_FIELDS = {
+  termii: ['apiKey', 'baseUrl'],
+  africastalking: ['apiKey', 'username'],
+  twilio: ['accountSid', 'authToken', 'fromNumber'],
+};
+const PROVIDER_SECRET_FIELD = {
+  termii: 'apiKey',
+  africastalking: 'apiKey',
+  twilio: 'authToken',
+};
+
 /**
  * Canonical form used for all status/template comparisons (spec §5.2).
  * @param {unknown} s
@@ -47,6 +61,8 @@ export function canonicalStatus(s) {
  * @property {Set<string>} notifyStatusesCanonical
  * @property {Record<string,string>} templates
  * @property {Record<string,string>} templatesByCanonical
+ * @property {string} smsProvider
+ * @property {Record<string,string>} smsCredentials
  */
 
 /**
@@ -125,6 +141,24 @@ export function validateTenant(raw, ctx, logger) {
   // (Foundation merge spec's "Sheet -> contacts sync" section).
   const syncContactsFromSheet = raw.syncContactsFromSheet === true;
 
+  // Per-tenant SMS provider (no fallback to any global config -- an empty
+  // provider is a valid "not configured yet" state, handled at send time,
+  // not rejected here).
+  const smsProvider = typeof raw.smsProvider === 'string' ? raw.smsProvider.trim() : '';
+  const smsCredentials =
+    raw.smsCredentials && typeof raw.smsCredentials === 'object' && !Array.isArray(raw.smsCredentials)
+      ? { ...raw.smsCredentials }
+      : {};
+  if (smsProvider !== '') {
+    const requiredFields = PROVIDER_REQUIRED_FIELDS[smsProvider];
+    if (!requiredFields) return skip('unknown "smsProvider" value', { smsProvider });
+    for (const field of requiredFields) {
+      if (typeof smsCredentials[field] !== 'string' || smsCredentials[field].trim() === '') {
+        return skip(`"smsCredentials.${field}" is required when smsProvider is "${smsProvider}"`, { smsProvider });
+      }
+    }
+  }
+
   return {
     id,
     name,
@@ -139,7 +173,52 @@ export function validateTenant(raw, ctx, logger) {
     notifyStatusesCanonical,
     templates: { ...raw.templates },
     templatesByCanonical,
+    smsProvider,
+    smsCredentials,
   };
+}
+
+/**
+ * Masks the one genuinely secret field for a provider (apiKey for termii/
+ * africastalking, authToken for twilio) to a last-4-visible form; every
+ * other field passes through unchanged. Applied only at the HTTP response
+ * boundary -- never touches what's stored or what the sending path reads.
+ * @param {string} provider
+ * @param {Record<string,string>} credentials
+ * @returns {Record<string,string>}
+ */
+export function maskSmsCredentials(provider, credentials) {
+  const secretField = PROVIDER_SECRET_FIELD[provider];
+  const safeCredentials = credentials && typeof credentials === 'object' ? credentials : {};
+  if (!secretField || typeof safeCredentials[secretField] !== 'string') {
+    return { ...safeCredentials };
+  }
+  const value = safeCredentials[secretField];
+  const masked = value.length <= 4 ? '••••' : '••••' + value.slice(-4);
+  return { ...safeCredentials, [secretField]: masked };
+}
+
+/**
+ * Only the *incoming* object's keys survive -- these are exactly the fields
+ * the form rendered for whichever provider is currently selected. For each
+ * of those keys, a non-empty string overwrites; an empty string falls back
+ * to whatever was already stored under that same key name (what lets a
+ * masked secret field stay blank without wiping the real value). A key that
+ * only exists in `existing` (a previous, now-unselected provider's field)
+ * is deliberately dropped rather than unioned in -- otherwise switching
+ * providers would leave the old provider's stale credentials lingering
+ * forever in storage and in masked API responses.
+ * @param {Record<string,string>} existing
+ * @param {Record<string,string>} incoming
+ * @returns {Record<string,string>}
+ */
+function mergeSmsCredentials(existing = {}, incoming = {}) {
+  const merged = {};
+  for (const key of Object.keys(incoming)) {
+    const incomingVal = incoming[key];
+    merged[key] = typeof incomingVal === 'string' && incomingVal.trim() !== '' ? incomingVal : existing[key] ?? '';
+  }
+  return merged;
 }
 
 /**
@@ -200,6 +279,8 @@ function rowToRaw(row) {
     templates: JSON.parse(row.templates_json),
     testNumber: row.test_number,
     syncContactsFromSheet: !!row.sync_contacts_from_sheet,
+    smsProvider: row.sms_provider,
+    smsCredentials: JSON.parse(row.sms_credentials_json),
   };
 }
 
@@ -261,11 +342,11 @@ export function createTenantRegistry({ db, logger }) {
   const selectAllStmt = db.prepare('SELECT * FROM tenants');
   const selectOneStmt = db.prepare('SELECT * FROM tenants WHERE id = ?');
   const insertStmt = db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateStmt = db.prepare(
-    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, updated_at = ?
+    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, sms_provider = ?, sms_credentials_json = ?, updated_at = ?
      WHERE id = ?`,
   );
 
@@ -325,6 +406,8 @@ export function createTenantRegistry({ db, logger }) {
         JSON.stringify(validated.templates),
         validated.testNumber,
         validated.syncContactsFromSheet ? 1 : 0,
+        validated.smsProvider,
+        JSON.stringify(validated.smsCredentials),
         now,
         now,
       );
@@ -343,8 +426,15 @@ export function createTenantRegistry({ db, logger }) {
       const existingRow = selectOneStmt.get(id);
       if (!existingRow) return { ok: false, notFound: true };
 
+      const existingRaw = rowToRaw(existingRow);
       const { id: _ignoredId, ...safePatch } = patch ?? {};
-      const merged = { ...rowToRaw(existingRow), ...safePatch, id };
+      // smsCredentials is the one field that does NOT follow "whole value
+      // replaces whole value" -- an empty string per key means "keep what's
+      // already stored," so a masked secret field can stay blank in the UI.
+      if (safePatch.smsCredentials && typeof safePatch.smsCredentials === 'object') {
+        safePatch.smsCredentials = mergeSmsCredentials(existingRaw.smsCredentials, safePatch.smsCredentials);
+      }
+      const merged = { ...existingRaw, ...safePatch, id };
 
       const ctx = buildDupContext(selectAllStmt.all(), merged, id);
       const capturing = createCapturingLogger();
@@ -362,6 +452,8 @@ export function createTenantRegistry({ db, logger }) {
         JSON.stringify(validated.templates),
         validated.testNumber,
         validated.syncContactsFromSheet ? 1 : 0,
+        validated.smsProvider,
+        JSON.stringify(validated.smsCredentials),
         new Date().toISOString(),
         id,
       );

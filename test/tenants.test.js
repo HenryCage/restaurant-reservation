@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTenantRegistry, validateRegistry, canonicalStatus } from '../src/tenants.js';
+import { createTenantRegistry, validateRegistry, canonicalStatus, maskSmsCredentials } from '../src/tenants.js';
 import { createDb } from '../src/db.js';
 
 /** A no-op logger that records error messages for assertions. */
@@ -119,6 +119,72 @@ describe('validateRegistry', () => {
     expect(validateRegistry({ tenants: 'nope' }, log)).toBeNull();
     expect(validateRegistry(null, log)).toBeNull();
   });
+
+  it('allows an empty smsProvider (not yet configured)', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant()] }, log);
+    expect(out).toHaveLength(1);
+    expect(out[0].smsProvider).toBe('');
+    expect(out[0].smsCredentials).toEqual({});
+  });
+
+  it('rejects an unknown smsProvider value', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant({ smsProvider: 'carrier-pigeon' })] }, log);
+    expect(out).toHaveLength(0);
+    expect(log.errors.some((e) => /unknown "smsProvider"/.test(e.m))).toBe(true);
+  });
+
+  it.each([
+    ['termii', { apiKey: 'k' }, 'baseUrl'],
+    ['termii', { baseUrl: 'https://x' }, 'apiKey'],
+    ['africastalking', { apiKey: 'k' }, 'username'],
+    ['africastalking', { username: 'sandbox' }, 'apiKey'],
+    ['twilio', { accountSid: 'AC', authToken: 't' }, 'fromNumber'],
+    ['twilio', { accountSid: 'AC', fromNumber: '+1' }, 'authToken'],
+    ['twilio', { authToken: 't', fromNumber: '+1' }, 'accountSid'],
+  ])('rejects %s missing required field %s', (smsProvider, smsCredentials, missingField) => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant({ smsProvider, smsCredentials })] }, log);
+    expect(out).toHaveLength(0);
+    expect(log.errors.some((e) => e.m.includes(`smsCredentials.${missingField}`))).toBe(true);
+  });
+
+  it('accepts a fully-configured provider', () => {
+    const log = fakeLogger();
+    const out = validateRegistry(
+      { tenants: [tenant({ smsProvider: 'termii', smsCredentials: { apiKey: 'k', baseUrl: 'https://x' } })] },
+      log,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].smsProvider).toBe('termii');
+    expect(out[0].smsCredentials).toEqual({ apiKey: 'k', baseUrl: 'https://x' });
+  });
+});
+
+describe('maskSmsCredentials', () => {
+  it('masks apiKey for termii, leaving baseUrl visible', () => {
+    const masked = maskSmsCredentials('termii', { apiKey: 'abcd1234ab12', baseUrl: 'https://x' });
+    expect(masked).toEqual({ apiKey: '••••ab12', baseUrl: 'https://x' });
+  });
+
+  it('masks apiKey for africastalking, leaving username visible', () => {
+    const masked = maskSmsCredentials('africastalking', { apiKey: 'secretvalue', username: 'sandbox' });
+    expect(masked).toEqual({ apiKey: '••••alue', username: 'sandbox' });
+  });
+
+  it('masks authToken for twilio, leaving accountSid/fromNumber visible', () => {
+    const masked = maskSmsCredentials('twilio', { accountSid: 'ACxxx', authToken: 'tok_secret1', fromNumber: '+1' });
+    expect(masked).toEqual({ accountSid: 'ACxxx', authToken: '••••ret1', fromNumber: '+1' });
+  });
+
+  it('masks a short value entirely rather than revealing it', () => {
+    expect(maskSmsCredentials('termii', { apiKey: 'ab', baseUrl: 'https://x' }).apiKey).toBe('••••');
+  });
+
+  it('passes through unchanged for an unconfigured (empty) provider', () => {
+    expect(maskSmsCredentials('', {})).toEqual({});
+  });
 });
 
 /** Builds a fresh in-memory registry + a raw-row insert helper for seeding it. */
@@ -143,13 +209,15 @@ function insertRawRow(db, over = {}) {
     templates_json: JSON.stringify({ 'Out for delivery': 'Hi {name}' }),
     test_number: '',
     sync_contacts_from_sheet: 0,
+    sms_provider: '',
+    sms_credentials_json: '{}',
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-01T00:00:00.000Z',
     ...over,
   };
   db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, created_at, updated_at)
-     VALUES (@id, @name, @active, @sheet_id, @sheet_name, @sender_id, @channel, @notify_statuses_json, @templates_json, @test_number, @sync_contacts_from_sheet, @created_at, @updated_at)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, created_at, updated_at)
+     VALUES (@id, @name, @active, @sheet_id, @sheet_name, @sender_id, @channel, @notify_statuses_json, @templates_json, @test_number, @sync_contacts_from_sheet, @sms_provider, @sms_credentials_json, @created_at, @updated_at)`,
   ).run(row);
 }
 
@@ -263,6 +331,53 @@ describe('createTenantRegistry (SQLite) — update()', () => {
     const res = registry.update('b', { senderId: 'SwiftLog' }); // collides with 'a'
     expect(res.ok).toBe(false);
     expect(res.error).toMatch(/shared with another active tenant/);
+  });
+
+  it('a blank secret field in the patch preserves the previously stored value', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ smsProvider: 'termii', smsCredentials: { apiKey: 'real-secret', baseUrl: 'https://x' } }));
+
+    const res = registry.update('swift', {
+      smsProvider: 'termii',
+      smsCredentials: { apiKey: '', baseUrl: 'https://x' }, // blank apiKey = keep existing
+    });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.smsCredentials.apiKey).toBe('real-secret');
+  });
+
+  it('a non-blank secret field in the patch overwrites the stored value', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ smsProvider: 'termii', smsCredentials: { apiKey: 'old-secret', baseUrl: 'https://x' } }));
+
+    const res = registry.update('swift', {
+      smsCredentials: { apiKey: 'new-secret', baseUrl: 'https://x' },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.smsCredentials.apiKey).toBe('new-secret');
+  });
+
+  it('switching provider leaves the new provider\'s fields correctly blank, rejected if not filled', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ smsProvider: 'termii', smsCredentials: { apiKey: 'k', baseUrl: 'https://x' } }));
+
+    const res = registry.update('swift', {
+      smsProvider: 'twilio',
+      smsCredentials: { accountSid: '', authToken: '', fromNumber: '' }, // nothing to inherit from termii's shape
+    });
+    expect(res.ok).toBe(false);
+    expect(res.error).toMatch(/smsCredentials.accountSid/);
+  });
+
+  it('switching provider with real values for the new provider succeeds', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ smsProvider: 'termii', smsCredentials: { apiKey: 'k', baseUrl: 'https://x' } }));
+
+    const res = registry.update('swift', {
+      smsProvider: 'twilio',
+      smsCredentials: { accountSid: 'AC1', authToken: 'tok1', fromNumber: '+15005550006' },
+    });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.smsCredentials).toEqual({ accountSid: 'AC1', authToken: 'tok1', fromNumber: '+15005550006' });
   });
 });
 

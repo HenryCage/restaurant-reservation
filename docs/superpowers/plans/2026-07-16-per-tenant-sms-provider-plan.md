@@ -21,12 +21,15 @@ Three implementation-level decisions the spec left open, resolved here:
    other field is exactly "whole value replaces whole value." A new private
    helper `mergeSmsCredentials(existing, incoming)` is applied specifically
    to `safePatch.smsCredentials` (when present) before that spread: it
-   iterates the union of both objects' keys, and for each key takes the
-   incoming value if it's a non-empty string, else the existing value (or
-   `''` if there was none). This one function is what makes a masked
-   secret field safe to leave blank, and what makes a provider switch
-   correctly leave a new provider's required fields blank (no shared key
-   names to "accidentally" inherit across providers).
+   iterates **only `incoming`'s keys** (exactly the fields the form
+   rendered for the currently-selected provider) and for each takes the
+   incoming value if it's a non-empty string, else falls back to
+   `existing`'s value under that same key. A key that exists only in
+   `existing` (a previous, now-unselected provider's field) is dropped, not
+   carried forward — caught by a test expecting a provider switch to leave
+   the new provider's `smsCredentials` containing *only* that provider's
+   fields, which failed against a first union-based implementation that
+   left the old provider's stale keys lingering.
 2. **How the sending path avoids a large mechanical rewrite of
    `test/processor.test.js`/`test/campaignScheduler.test.js`.** Both files
    inject a single `sendSms` function today and have ~20-25 call sites each
