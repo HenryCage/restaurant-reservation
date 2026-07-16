@@ -1,8 +1,11 @@
 // tenants.js — load and validate the per-tenant registry (spec §5.1).
 //
-// The registry is a swappable source (a JSON file in v1) re-read each tick.
-// Two robustness rules from the spec live here:
-//   1) A whole-file read/parse error must NOT zero out the fleet — we keep the
+// The registry lives in the `tenants` SQLite table (Tenant management spec:
+// docs/superpowers/specs/2026-07-16-tenant-management-design.md) -- it was a
+// hand-edited tenants.json file before that migration; see
+// scripts/migrate-tenants.mjs for the one-time move. Two robustness rules
+// from the original spec still apply, now against the DB instead of a file:
+//   1) A whole-query read failure must NOT zero out the fleet — we keep the
 //      last-known-good registry in memory and log (spec §4/§7).
 //   2) An individual invalid tenant is skipped-and-logged, never crashes the run
 //      (spec §14). senderId is format-validated and must be unique across active
@@ -10,8 +13,11 @@
 //
 // Canonical (trim + lower-case) lookups for statuses and templates are precomputed
 // here so the processor's comparisons round-trip identically (spec §5.2).
-
-import { readFileSync } from 'node:fs';
+//
+// validateTenant/validateRegistry are deliberately unchanged by the SQLite
+// migration -- they only ever operated on a plain "raw" object shape, and a
+// SQLite row (JSON-decoded) is mapped into that exact same shape by
+// rowToRaw() below, so no validation logic needed to move.
 
 const SENDER_ID_RE = /^[A-Za-z0-9]{3,11}$/;
 const DEFAULT_SHEET_NAME = 'Orders';
@@ -176,47 +182,190 @@ export function validateRegistry(parsed, logger) {
 }
 
 /**
- * Create a registry loader bound to a file path. `.load()` returns the current
- * active tenants, falling back to the last-known-good set on read/parse failure.
- * @param {{ filePath: string, logger: import('./logger.js').Logger, readFile?: (p: string) => string }} deps
+ * Map a `tenants` table row to the plain "raw" shape validateTenant expects
+ * (the same shape a tenants.json array entry used to have).
+ * @param {any} row
+ * @returns {any}
  */
-export function createTenantRegistry({ filePath, logger, readFile = (p) => readFileSync(p, 'utf8') }) {
+function rowToRaw(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    active: !!row.active,
+    sheetId: row.sheet_id,
+    sheetName: row.sheet_name,
+    senderId: row.sender_id,
+    channel: row.channel,
+    notifyStatuses: JSON.parse(row.notify_statuses_json),
+    templates: JSON.parse(row.templates_json),
+    testNumber: row.test_number,
+    syncContactsFromSheet: !!row.sync_contacts_from_sheet,
+  };
+}
+
+/**
+ * A logger stand-in that records the last message passed to .error() so a
+ * caller can surface it as an HTTP error body, without changing
+ * validateTenant's signature (it only ever calls logger.error(msg, meta)).
+ * @returns {{ logger: import('./logger.js').Logger, message: string|null }}
+ */
+function createCapturingLogger() {
+  let message = null;
+  const logger = {
+    error: (msg) => {
+      message = msg;
+    },
+    warn: () => {},
+    info: () => {},
+    debug: () => {},
+    child: () => logger,
+  };
+  return {
+    logger,
+    get message() {
+      return message;
+    },
+  };
+}
+
+/**
+ * Simulate validateRegistry's whole-batch duplicate pre-scan for a single
+ * incoming row being created or updated: does its id/senderId collide with
+ * any *other* row currently in the table? (excludeId lets update() ignore
+ * the row being updated against itself).
+ * @param {any[]} existingRows - raw `tenants` table rows.
+ * @param {any} candidateRaw - the raw shape being validated.
+ * @param {string|null} excludeId
+ */
+function buildDupContext(existingRows, candidateRaw, excludeId) {
+  const others = excludeId ? existingRows.filter((r) => r.id !== excludeId) : existingRows;
+  const dupIds = others.some((r) => r.id === candidateRaw.id) ? new Set([candidateRaw.id]) : new Set();
+
+  const candidateSenderLower = String(candidateRaw.senderId ?? '').trim().toLowerCase();
+  const activeOtherSenderIds = others.filter((r) => r.active).map((r) => String(r.sender_id).trim().toLowerCase());
+  const dupSenderIds =
+    candidateRaw.active === true && activeOtherSenderIds.includes(candidateSenderLower)
+      ? new Set([candidateSenderLower])
+      : new Set();
+
+  return { dupIds, dupSenderIds };
+}
+
+/**
+ * Create a registry loader bound to the `tenants` table. `.load()` returns the
+ * current active tenants, falling back to the last-known-good set on a query
+ * failure. `.listAll()`/`.create()`/`.update()` back the admin UI.
+ * @param {{ db: import('better-sqlite3').Database, logger: import('./logger.js').Logger }} deps
+ */
+export function createTenantRegistry({ db, logger }) {
+  const selectAllStmt = db.prepare('SELECT * FROM tenants');
+  const selectOneStmt = db.prepare('SELECT * FROM tenants WHERE id = ?');
+  const insertStmt = db.prepare(
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const updateStmt = db.prepare(
+    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, updated_at = ?
+     WHERE id = ?`,
+  );
+
   /** @type {Tenant[]} */
   let lastGood = [];
 
   return {
     /** @returns {Tenant[]} */
     load() {
-      let text;
+      let rows;
       try {
-        text = readFile(filePath);
+        rows = selectAllStmt.all();
       } catch (err) {
-        logger.error(`tenants: cannot read ${filePath}; keeping last-known-good (${lastGood.length} tenant(s))`, {
+        logger.error(`tenants: cannot read the tenants table; keeping last-known-good (${lastGood.length} tenant(s))`, {
           error: err instanceof Error ? err.message : String(err),
         });
         return lastGood;
       }
 
-      let parsed;
-      try {
-        parsed = JSON.parse(text);
-      } catch (err) {
-        logger.error(`tenants: invalid JSON in ${filePath}; keeping last-known-good (${lastGood.length} tenant(s))`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-        return lastGood;
-      }
-
-      const result = validateRegistry(parsed, logger);
+      const result = validateRegistry({ tenants: rows.map(rowToRaw) }, logger);
       if (result === null) {
         logger.error(
-          `tenants: ${filePath} has no valid "tenants" array; keeping last-known-good (${lastGood.length} tenant(s))`,
+          `tenants: the tenants table produced no valid "tenants" array; keeping last-known-good (${lastGood.length} tenant(s))`,
         );
         return lastGood;
       }
 
       lastGood = result;
       return result;
+    },
+
+    /** Every tenant, active or not -- for the admin list view. @returns {any[]} */
+    listAll() {
+      return selectAllStmt.all().map(rowToRaw);
+    },
+
+    /**
+     * @param {any} raw
+     * @returns {{ ok: true, tenant: any } | { ok: false, error: string }}
+     */
+    create(raw) {
+      const ctx = buildDupContext(selectAllStmt.all(), raw, null);
+      const capturing = createCapturingLogger();
+      const validated = validateTenant(raw, ctx, capturing.logger);
+      if (!validated) return { ok: false, error: capturing.message };
+
+      const now = new Date().toISOString();
+      insertStmt.run(
+        validated.id,
+        validated.name,
+        validated.active ? 1 : 0,
+        validated.sheetId,
+        validated.sheetName,
+        validated.senderId,
+        validated.channel,
+        JSON.stringify(validated.notifyStatuses),
+        JSON.stringify(validated.templates),
+        validated.testNumber,
+        validated.syncContactsFromSheet ? 1 : 0,
+        now,
+        now,
+      );
+      return { ok: true, tenant: rowToRaw(selectOneStmt.get(validated.id)) };
+    },
+
+    /**
+     * Partial/merge update -- `patch` carries only the fields being changed.
+     * `id` in `patch` is ignored (renaming would orphan existing
+     * contacts/campaigns/users foreign keys); the row's id never changes.
+     * @param {string} id
+     * @param {any} patch
+     * @returns {{ ok: true, tenant: any } | { ok: false, error: string } | { ok: false, notFound: true }}
+     */
+    update(id, patch) {
+      const existingRow = selectOneStmt.get(id);
+      if (!existingRow) return { ok: false, notFound: true };
+
+      const { id: _ignoredId, ...safePatch } = patch ?? {};
+      const merged = { ...rowToRaw(existingRow), ...safePatch, id };
+
+      const ctx = buildDupContext(selectAllStmt.all(), merged, id);
+      const capturing = createCapturingLogger();
+      const validated = validateTenant(merged, ctx, capturing.logger);
+      if (!validated) return { ok: false, error: capturing.message };
+
+      updateStmt.run(
+        validated.name,
+        validated.active ? 1 : 0,
+        validated.sheetId,
+        validated.sheetName,
+        validated.senderId,
+        validated.channel,
+        JSON.stringify(validated.notifyStatuses),
+        JSON.stringify(validated.templates),
+        validated.testNumber,
+        validated.syncContactsFromSheet ? 1 : 0,
+        new Date().toISOString(),
+        id,
+      );
+      return { ok: true, tenant: rowToRaw(selectOneStmt.get(id)) };
     },
   };
 }
