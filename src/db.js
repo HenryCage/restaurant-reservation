@@ -5,6 +5,8 @@
 // engine (tenants.json + Google Sheets) is untouched by this store; it exists
 // alongside it, not instead of it.
 
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import Database from 'better-sqlite3';
 
 const SCHEMA = `
@@ -49,6 +51,7 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
  * @returns {import('better-sqlite3').Database}
  */
 export function createDb(path) {
+  if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
   db.exec(SCHEMA);

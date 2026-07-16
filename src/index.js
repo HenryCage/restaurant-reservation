@@ -11,6 +11,10 @@ import { createTenantRegistry } from './tenants.js';
 import { createSheetsClient } from './sheets.js';
 import { createSmsSender } from './sms/index.js';
 import { createProcessor } from './processor.js';
+import { createDb } from './db.js';
+import { createContactsStore } from './contacts.js';
+import { createCampaignsStore } from './campaigns.js';
+import { createCampaignScheduler } from './campaignScheduler.js';
 
 function main() {
   const logger = createLogger({ level: process.env.LOG_LEVEL || 'info' });
@@ -37,7 +41,25 @@ function main() {
   const registry = createTenantRegistry({ filePath: config.tenantsFile, logger });
   const sheets = createSheetsClient(config);
   const sendSms = createSmsSender(config);
-  const processor = createProcessor({ config, logger, registry, sheets, sendSms });
+
+  const db = createDb(config.dbPath);
+  const contactsStore = createContactsStore(db, { defaultCountryCode: config.defaultCountryCode });
+  const campaignsStore = createCampaignsStore(db);
+
+  // Opt-in sheet -> contacts sync (Foundation merge spec): processor.js itself
+  // never needs to know the opt-in flag exists, keeping its dependency surface
+  // unchanged -- this closure decides, and isolates its own failures.
+  function onNotified(tenant, contact) {
+    if (!tenant.syncContactsFromSheet) return;
+    try {
+      contactsStore.upsertContact(tenant.id, contact);
+    } catch (err) {
+      logger.child(tenant.id).error('contacts sync failed', { error: err?.message ?? String(err) });
+    }
+  }
+
+  const processor = createProcessor({ config, logger, registry, sheets, sendSms, onNotified });
+  const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, sendSms });
 
   // Fail loudly and exit so a supervisor can restart from a clean state.
   process.on('unhandledRejection', (reason) => {
@@ -61,9 +83,21 @@ function main() {
   tick(); // run immediately, then on the interval
   const timer = setInterval(tick, intervalMs);
 
+  logger.info(`campaign scheduler started: ticking every ${config.campaignTickIntervalMs}ms`);
+
+  const campaignTick = () => {
+    campaignScheduler
+      .run()
+      .catch((err) => logger.error('campaign tick failed', { error: err?.message ?? String(err) }));
+  };
+
+  campaignTick(); // run immediately, then on its own interval
+  const campaignTimer = setInterval(campaignTick, config.campaignTickIntervalMs);
+
   const shutdown = (signal) => {
     logger.info(`received ${signal}, shutting down`);
     clearInterval(timer);
+    clearInterval(campaignTimer);
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

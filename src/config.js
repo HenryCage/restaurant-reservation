@@ -110,6 +110,11 @@ export function loadConfig(env = process.env) {
   const httpTimeoutMs = parseIntEnv(env, 'HTTP_TIMEOUT_MS', 15000, errors);
   const maxSendsPerTenantPerTick = parseIntEnv(env, 'MAX_SENDS_PER_TENANT_PER_TICK', 50, errors);
 
+  // Foundation merge (contacts/campaigns) additions.
+  const dbPath = (env.DB_PATH ?? 'data/platform.db').trim() || 'data/platform.db';
+  const campaignTickIntervalMs = parseIntEnv(env, 'CAMPAIGN_TICK_INTERVAL_MS', 10000, errors);
+  const maxCampaignRecipientsPerTick = parseIntEnv(env, 'MAX_CAMPAIGN_RECIPIENTS_PER_TICK', 50, errors);
+
   const tenantsFile = (env.TENANTS_FILE ?? './tenants.json').trim() || './tenants.json';
   const dryRun = parseBool(env.DRY_RUN, false);
 
@@ -135,6 +140,9 @@ export function loadConfig(env = process.env) {
     sendDelayMs,
     httpTimeoutMs,
     maxSendsPerTenantPerTick,
+    dbPath,
+    campaignTickIntervalMs,
+    maxCampaignRecipientsPerTick,
     tenantsFile,
     dryRun,
     globalTestNumber,

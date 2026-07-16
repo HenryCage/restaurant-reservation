@@ -24,6 +24,9 @@ describe('loadConfig — happy path', () => {
     expect(cfg.httpTimeoutMs).toBe(15000);
     expect(cfg.maxSendsPerTenantPerTick).toBe(50);
     expect(cfg.dryRun).toBe(false);
+    expect(cfg.dbPath).toBe('data/platform.db');
+    expect(cfg.campaignTickIntervalMs).toBe(10000);
+    expect(cfg.maxCampaignRecipientsPerTick).toBe(50);
   });
 
   it('un-escapes the \\n sequences in the private key', () => {
