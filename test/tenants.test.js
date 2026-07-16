@@ -160,6 +160,18 @@ describe('validateRegistry', () => {
     expect(out[0].smsProvider).toBe('termii');
     expect(out[0].smsCredentials).toEqual({ apiKey: 'k', baseUrl: 'https://x' });
   });
+
+  it('defaultCountryCode defaults to empty (no override) when absent', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant()] }, log);
+    expect(out[0].defaultCountryCode).toBe('');
+  });
+
+  it('defaultCountryCode strips non-digit characters', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant({ defaultCountryCode: '+370' })] }, log);
+    expect(out[0].defaultCountryCode).toBe('370');
+  });
 });
 
 describe('maskSmsCredentials', () => {
@@ -291,6 +303,13 @@ describe('createTenantRegistry (SQLite) — create()', () => {
     registry.create(tenant({ id: 'a', active: false }));
     const res = registry.create(tenant({ id: 'b' }));
     expect(res.ok).toBe(true);
+  });
+
+  it('round-trips defaultCountryCode', () => {
+    const { registry } = makeRegistry();
+    const res = registry.create(tenant({ defaultCountryCode: '370' }));
+    expect(res.ok).toBe(true);
+    expect(res.tenant.defaultCountryCode).toBe('370');
   });
 });
 

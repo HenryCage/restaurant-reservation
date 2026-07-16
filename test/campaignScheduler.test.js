@@ -328,3 +328,29 @@ describe('campaignScheduler — crash safety', () => {
     expect(campaignsStore.pendingRecipients(c.id, 10)).toHaveLength(0);
   });
 });
+
+describe('campaignScheduler — tenant defaultCountryCode', () => {
+  it("uses the tenant's own defaultCountryCode for a bare testNumber override", async () => {
+    // Mirrors processor.js's regression test: a tenant's own default country
+    // code must win over the global default when resolving a bare (no "+")
+    // number -- here, the test-number override itself.
+    const { contacts, campaignsStore, config } = makeHarness();
+    const tenants = buildTenants([rawTenant({ testNumber: '37060012345', defaultCountryCode: '370' })]);
+    contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+    campaignsStore.createCampaign('t1', { name: 'P', message: 'hi', sendTo: 'all', scheduledTime: PAST });
+
+    const sendSms = makeSendSms();
+    const scheduler = createCampaignScheduler({
+      config,
+      logger: silentLogger(),
+      registry: makeRegistry(tenants),
+      campaignsStore,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
+      now: FIXED_NOW,
+    });
+
+    await scheduler.run();
+    expect(sendSms.calls).toHaveLength(1);
+    expect(sendSms.calls[0].to).toBe('+37060012345');
+  });
+});

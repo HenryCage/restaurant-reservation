@@ -108,6 +108,19 @@ function ensureTenantsSmsColumns(db) {
 }
 
 /**
+ * Same self-healing pattern -- lets a bare (no "+") phone number in a
+ * tenant's sheet/contacts/campaigns resolve against that tenant's own
+ * country instead of the global DEFAULT_COUNTRY_CODE. Empty string means
+ * "no override, use the global default" (existing tenants keep today's
+ * behavior unchanged).
+ * @param {import('better-sqlite3').Database} db
+ */
+function ensureTenantsDefaultCountryCodeColumn(db) {
+  const hasCol = db.prepare('PRAGMA table_info(tenants)').all().some((col) => col.name === 'default_country_code');
+  if (!hasCol) db.exec("ALTER TABLE tenants ADD COLUMN default_country_code TEXT NOT NULL DEFAULT ''");
+}
+
+/**
  * Open (or create) the SQLite database and ensure the schema exists.
  * @param {string} path - filesystem path, or ':memory:' for tests.
  * @returns {import('better-sqlite3').Database}
@@ -119,5 +132,6 @@ export function createDb(path) {
   db.exec(SCHEMA);
   ensureUsersActiveColumn(db);
   ensureTenantsSmsColumns(db);
+  ensureTenantsDefaultCountryCodeColumn(db);
   return db;
 }

@@ -63,6 +63,7 @@ export function canonicalStatus(s) {
  * @property {Record<string,string>} templatesByCanonical
  * @property {string} smsProvider
  * @property {Record<string,string>} smsCredentials
+ * @property {string} defaultCountryCode
  */
 
 /**
@@ -159,6 +160,14 @@ export function validateTenant(raw, ctx, logger) {
     }
   }
 
+  // Empty means "no override, use the global DEFAULT_COUNTRY_CODE" -- lets a
+  // bare (no "+") phone number in this tenant's sheet/contacts/campaigns
+  // resolve against this tenant's own country instead of assuming Nigeria.
+  // A "+"-prefixed number always wins regardless of this setting (phone.js's
+  // isValidE164 trusts a number's own embedded country over any default).
+  const defaultCountryCode =
+    typeof raw.defaultCountryCode === 'string' ? raw.defaultCountryCode.replace(/\D/g, '') : '';
+
   return {
     id,
     name,
@@ -175,6 +184,7 @@ export function validateTenant(raw, ctx, logger) {
     templatesByCanonical,
     smsProvider,
     smsCredentials,
+    defaultCountryCode,
   };
 }
 
@@ -281,6 +291,7 @@ function rowToRaw(row) {
     syncContactsFromSheet: !!row.sync_contacts_from_sheet,
     smsProvider: row.sms_provider,
     smsCredentials: JSON.parse(row.sms_credentials_json),
+    defaultCountryCode: row.default_country_code,
   };
 }
 
@@ -342,11 +353,11 @@ export function createTenantRegistry({ db, logger }) {
   const selectAllStmt = db.prepare('SELECT * FROM tenants');
   const selectOneStmt = db.prepare('SELECT * FROM tenants WHERE id = ?');
   const insertStmt = db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, default_country_code, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateStmt = db.prepare(
-    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, sms_provider = ?, sms_credentials_json = ?, updated_at = ?
+    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, sms_provider = ?, sms_credentials_json = ?, default_country_code = ?, updated_at = ?
      WHERE id = ?`,
   );
 
@@ -408,6 +419,7 @@ export function createTenantRegistry({ db, logger }) {
         validated.syncContactsFromSheet ? 1 : 0,
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
+        validated.defaultCountryCode,
         now,
         now,
       );
@@ -454,6 +466,7 @@ export function createTenantRegistry({ db, logger }) {
         validated.syncContactsFromSheet ? 1 : 0,
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
+        validated.defaultCountryCode,
         new Date().toISOString(),
         id,
       );

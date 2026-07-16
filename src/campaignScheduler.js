@@ -25,6 +25,18 @@ export function createCampaignScheduler(deps) {
   let running = false;
 
   /**
+   * A tenant's own default country code (if it has one set) always wins over
+   * the global DEFAULT_COUNTRY_CODE. Mirrors processor.js's countryCodeFor
+   * exactly (duplicated rather than imported, to keep processor.js's
+   * dependency surface untouched — see the spec).
+   * @param {import('./tenants.js').Tenant} tenant
+   * @returns {string}
+   */
+  function countryCodeFor(tenant) {
+    return tenant.defaultCountryCode || config.defaultCountryCode;
+  }
+
+  /**
    * Resolve the actual recipient: a test override (already gated by config)
    * wins, otherwise the contact's own number. Mirrors processor.js's
    * resolveRecipient exactly (duplicated rather than imported, to keep
@@ -35,7 +47,7 @@ export function createCampaignScheduler(deps) {
    */
   function resolveRecipient(tenant, contactE164) {
     const override = config.effectiveGlobalTestNumber || tenant.testNumber || '';
-    if (override) return normalisePhone(override, config.defaultCountryCode) || override;
+    if (override) return normalisePhone(override, countryCodeFor(tenant)) || override;
     return contactE164;
   }
 
@@ -48,7 +60,7 @@ export function createCampaignScheduler(deps) {
    * @param {(to: string, message: string, opts: any) => Promise<any>} sendSms
    */
   async function sendToRecipient(tenant, log, campaign, recipient, sendSms) {
-    const contactE164 = normalisePhone(recipient.phone, config.defaultCountryCode) || recipient.phone;
+    const contactE164 = normalisePhone(recipient.phone, countryCodeFor(tenant)) || recipient.phone;
     const to = resolveRecipient(tenant, contactE164);
 
     /** @type {{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }} */

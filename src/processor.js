@@ -40,6 +40,18 @@ export function createProcessor(deps) {
   let running = false;
 
   /**
+   * A tenant's own default country code (if it has one set) always wins over
+   * the global DEFAULT_COUNTRY_CODE -- lets a bare (no "+") phone number in
+   * this tenant's sheet resolve against its actual customer base instead of
+   * always assuming Nigeria (Per-tenant SMS provider spec's sibling fix).
+   * @param {import('./tenants.js').Tenant} tenant
+   * @returns {string}
+   */
+  function countryCodeFor(tenant) {
+    return tenant.defaultCountryCode || config.defaultCountryCode;
+  }
+
+  /**
    * Resolve the actual recipient: a test override (already gated by config) wins,
    * otherwise the validated customer number. Override numbers are normalised when
    * possible, falling back to the raw string.
@@ -49,7 +61,7 @@ export function createProcessor(deps) {
    */
   function resolveRecipient(tenant, customerE164) {
     const override = config.effectiveGlobalTestNumber || tenant.testNumber || '';
-    if (override) return normalisePhone(override, config.defaultCountryCode) || override;
+    if (override) return normalisePhone(override, countryCodeFor(tenant)) || override;
     return customerE164;
   }
 
@@ -93,7 +105,7 @@ export function createProcessor(deps) {
       if (!tenant.notifyStatusesCanonical.has(canonStatus)) continue;
       if (canonStatus === canonicalStatus(row.lastNotifiedStatus)) continue; // already handled / given up
 
-      const e164 = normalisePhone(row.phone, config.defaultCountryCode);
+      const e164 = normalisePhone(row.phone, countryCodeFor(tenant));
       if (!e164) {
         summary.invalidPhone += 1;
         log.warn('invalid phone, skipping row', { orderId: row.orderId, phone: maskPhone(row.phone) });

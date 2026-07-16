@@ -383,6 +383,21 @@ describe('processor — guardrails & robustness', () => {
     expect(sheets.writes).toHaveLength(0);
     expect(out.summaries[0]).toMatchObject({ tenantId: 'a', scanned: 0 });
   });
+
+  it("uses the tenant's own defaultCountryCode instead of the global default (regression)", async () => {
+    // Real bug: a bare (no "+") Lithuanian sheet phone number was logged
+    // "invalid phone, skipping row" because the global default country code
+    // (Nigeria, 234) was always used regardless of which tenant it was.
+    const tenants = buildTenants([rawTenant({ defaultCountryCode: '370' })]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow({ phone: '37060012345' })] } });
+    const sendSms = makeSendSms();
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+
+    const out = await processor.run();
+    expect(out.summaries[0].invalidPhone).toBe(0);
+    expect(sendSms.calls).toHaveLength(1);
+    expect(sendSms.calls[0].to).toBe('+37060012345');
+  });
 });
 
 describe('processor — DRY_RUN and test-number override', () => {
