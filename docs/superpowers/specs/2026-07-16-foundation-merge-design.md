@@ -1,7 +1,10 @@
 # Foundation merge: contacts, campaigns, Twilio adapter
 
 Date: 2026-07-16
-Status: approved (design), not yet implemented
+Status: implemented (see docs/superpowers/plans/2026-07-16-foundation-merge-plan.md
+for the step-by-step commit history). Live smoke-testing against real Google
+Sheets/SMS provider credentials is still open -- deliberately not run
+unattended.
 
 ## Context
 

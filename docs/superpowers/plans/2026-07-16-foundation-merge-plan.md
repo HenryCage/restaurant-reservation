@@ -1,7 +1,12 @@
 # Implementation plan: Foundation merge
 
 Spec: `docs/superpowers/specs/2026-07-16-foundation-merge-design.md`
-Status: not started
+Status: steps 1-8 implemented and committed; step 9 (manual smoke check)
+done via a throwaway fake-deps integration script (not committed -- see
+commit history). The live end-to-end check against real Google Sheets/SMS
+credentials (the fuller version of step 9 described below) was deliberately
+not run unattended and is still open -- see the final summary in the
+conversation this plan came from.
 
 ## Sequencing rationale
 
