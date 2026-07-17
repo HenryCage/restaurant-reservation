@@ -19,7 +19,7 @@ cd client && npm run build    # production bundle -> client/dist, served by the 
 cd client && npm test         # vitest run (jsdom + React Testing Library)
 ```
 
-No build step for the backend itself and no linter configured anywhere. Local runs need a backend `.env` (copy `.env.example`). There is no `tenants.json`/`TENANTS_FILE` anymore — tenant configuration lives in SQLite (`DB_PATH`, created automatically); `scripts/migrate-tenants.mjs` is a one-time importer for a legacy `tenants.json` file if you're migrating an old deployment. For local dashboard development, copy `client/.env.example` to **`client/.env.development`** (not plain `client/.env` — Vite loads plain `.env` in every mode including production builds, which previously leaked a dev-only backend URL into a production bundle).
+No build step for the backend itself and no linter configured anywhere. Local runs need a backend `.env` (copy `.env.example`). There is no `tenants.json`/`TENANTS_FILE` anymore — tenant configuration lives in SQLite (`DB_PATH`, created automatically). This system has no prior deployments to migrate from, so there's no legacy-`tenants.json` importer to worry about. For local dashboard development, copy `client/.env.example` to **`client/.env.development`** (not plain `client/.env` — Vite loads plain `.env` in every mode including production builds, which previously leaked a dev-only backend URL into a production bundle).
 
 ## What this is
 

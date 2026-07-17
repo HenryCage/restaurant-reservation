@@ -2,8 +2,7 @@
 //
 // The registry lives in the `tenants` SQLite table (Tenant management spec:
 // docs/superpowers/specs/2026-07-16-tenant-management-design.md) -- it was a
-// hand-edited tenants.json file before that migration; see
-// scripts/migrate-tenants.mjs for the one-time move. Two robustness rules
+// hand-edited tenants.json file before that migration. Two robustness rules
 // from the original spec still apply, now against the DB instead of a file:
 //   1) A whole-query read failure must NOT zero out the fleet — we keep the
 //      last-known-good registry in memory and log (spec §4/§7).
