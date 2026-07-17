@@ -101,6 +101,268 @@ describe('GET/POST /api/contacts', () => {
   });
 });
 
+describe('GET /api/status', () => {
+  it('an unauthenticated request is 401', async () => {
+    ctx = await startTestServer();
+    const res = await fetch(`${ctx.baseUrl}/api/status`);
+    expect(res.status).toBe(401);
+  });
+
+  it('404s when the tenant does not exist in the registry', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const res = await fetch(`${ctx.baseUrl}/api/status`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(404);
+  });
+
+  it('reports providerConfigured: false and no overrides for a freshly-created tenant', async () => {
+    ctx = await startTestServer();
+    ctx.registry.create({
+      id: 't1',
+      name: 'Acme',
+      active: true,
+      sheetId: 'sheet1',
+      senderId: 'ACMESENDER',
+      notifyStatuses: ['Delivered'],
+      templates: { delivered: 'Hi {name}' },
+    });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/status`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ providerConfigured: false, dryRun: false, testOverrideActive: false });
+  });
+
+  it('reports providerConfigured: true once an SMS provider is configured', async () => {
+    ctx = await startTestServer();
+    ctx.registry.create({
+      id: 't1',
+      name: 'Acme',
+      active: true,
+      sheetId: 'sheet1',
+      senderId: 'ACMESENDER',
+      notifyStatuses: ['Delivered'],
+      templates: { delivered: 'Hi {name}' },
+      smsProvider: 'termii',
+      smsCredentials: { apiKey: 'secret-key', baseUrl: 'https://termii.example' },
+    });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/status`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.providerConfigured).toBe(true);
+    expect(body).not.toHaveProperty('smsCredentials'); // never leaks secrets
+  });
+
+  it('reports testOverrideActive: true when the tenant has its own testNumber set', async () => {
+    ctx = await startTestServer();
+    ctx.registry.create({
+      id: 't1',
+      name: 'Acme',
+      active: true,
+      sheetId: 'sheet1',
+      senderId: 'ACMESENDER',
+      notifyStatuses: ['Delivered'],
+      templates: { delivered: 'Hi {name}' },
+      testNumber: '+2348000000000',
+    });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/status`, { headers: { Cookie: cookie } });
+    expect((await res.json()).testOverrideActive).toBe(true);
+  });
+
+  it('reports dryRun: true when the server is running in dry-run mode', async () => {
+    ctx = await startTestServer({ configOverrides: { dryRun: true } });
+    ctx.registry.create({
+      id: 't1',
+      name: 'Acme',
+      active: true,
+      sheetId: 'sheet1',
+      senderId: 'ACMESENDER',
+      notifyStatuses: ['Delivered'],
+      templates: { delivered: 'Hi {name}' },
+    });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/status`, { headers: { Cookie: cookie } });
+    expect((await res.json()).dryRun).toBe(true);
+  });
+});
+
+describe('PATCH/DELETE /api/contacts/:id', () => {
+  it('updates a contact', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const contact = ctx.contactsStore.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/${contact.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'Ada Lovelace' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).name).toBe('Ada Lovelace');
+  });
+
+  it('404s updating another tenant\'s contact', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const contact = ctx.contactsStore.createContact('t2', { name: 'Bola', phone: '+2348023456789' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/${contact.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('deletes a contact', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const contact = ctx.contactsStore.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/${contact.id}`, { method: 'DELETE', headers: { Cookie: cookie } });
+    expect(res.status).toBe(204);
+    expect(ctx.contactsStore.listContacts('t1')).toHaveLength(0);
+  });
+
+  it('404s deleting a nonexistent contact', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/nonexistent`, { method: 'DELETE', headers: { Cookie: cookie } });
+    expect(res.status).toBe(404);
+  });
+
+  it('409s deleting a contact with existing campaign history', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const contact = ctx.contactsStore.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+    const campaign = ctx.campaignsStore.createCampaign('t1', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2025-01-01T00:00:00.000Z',
+    });
+    ctx.campaignsStore.ensureRecipients(campaign.id, 't1', 'all');
+
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/${contact.id}`, { method: 'DELETE', headers: { Cookie: cookie } });
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toMatch(/existing campaign history/);
+  });
+
+  it('an unauthenticated request is 401', async () => {
+    ctx = await startTestServer();
+    const res = await fetch(`${ctx.baseUrl}/api/contacts/some-id`, { method: 'PATCH' });
+    expect(res.status).toBe(401);
+  });
+});
+
+describe('PATCH /api/campaigns/:id, POST /:id/cancel, GET /:id/recipients', () => {
+  it('updates a pending campaign', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const campaign = ctx.campaignsStore.createCampaign('t1', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2099-01-01T00:00:00.000Z',
+    });
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'Promo v2' }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).name).toBe('Promo v2');
+  });
+
+  it('404s updating another tenant\'s campaign', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const campaign = ctx.campaignsStore.createCampaign('t2', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2099-01-01T00:00:00.000Z',
+    });
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ name: 'x' }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('cancels a pending campaign', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const campaign = ctx.campaignsStore.createCampaign('t1', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2099-01-01T00:00:00.000Z',
+    });
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}/cancel`, { method: 'POST', headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe('cancelled');
+  });
+
+  it('400s cancelling a campaign that is no longer pending', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    ctx.contactsStore.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+    const campaign = ctx.campaignsStore.createCampaign('t1', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2020-01-01T00:00:00.000Z',
+    });
+    ctx.campaignsStore.ensureRecipients(campaign.id, 't1', 'all'); // flips to 'processing'
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}/cancel`, { method: 'POST', headers: { Cookie: cookie } });
+    expect(res.status).toBe(400);
+  });
+
+  it('lists per-recipient outcomes for a campaign', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    ctx.contactsStore.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+    const campaign = ctx.campaignsStore.createCampaign('t1', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2020-01-01T00:00:00.000Z',
+    });
+    ctx.campaignsStore.ensureRecipients(campaign.id, 't1', 'all');
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(200);
+    const recipients = await res.json();
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]).toMatchObject({ phone: '+2348012345678', status: 'pending' });
+  });
+
+  it('404s listing recipients for another tenant\'s campaign', async () => {
+    ctx = await startTestServer();
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+    const campaign = ctx.campaignsStore.createCampaign('t2', {
+      name: 'Promo',
+      message: 'hi',
+      sendTo: 'all',
+      scheduledTime: '2099-01-01T00:00:00.000Z',
+    });
+
+    const res = await fetch(`${ctx.baseUrl}/api/campaigns/${campaign.id}/recipients`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('GET/POST /api/campaigns', () => {
   it('an unauthenticated request is 401', async () => {
     ctx = await startTestServer();

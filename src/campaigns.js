@@ -54,6 +54,13 @@ export function createCampaignsStore(db, deps = {}) {
   const findContactStmt = db.prepare('SELECT id, phone FROM contacts WHERE tenant_id = ? AND id = ?');
   const tenantContactsStmt = db.prepare('SELECT id, phone FROM contacts WHERE tenant_id = ?');
   const listCampaignsStmt = db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? ORDER BY created_at DESC');
+  const getCampaignStmt = db.prepare('SELECT * FROM campaigns WHERE tenant_id = ? AND id = ?');
+  const updateCampaignStmt = db.prepare(
+    'UPDATE campaigns SET name = ?, message = ?, send_to = ?, scheduled_time = ? WHERE tenant_id = ? AND id = ?',
+  );
+  const cancelCampaignStmt = db.prepare("UPDATE campaigns SET status = 'cancelled' WHERE tenant_id = ? AND id = ?");
+  const setCampaignFailedStmt = db.prepare("UPDATE campaigns SET status = 'failed', error = ? WHERE id = ?");
+  const recipientsForCampaignStmt = db.prepare('SELECT * FROM campaign_recipients WHERE campaign_id = ? ORDER BY rowid');
   const dueCampaignsStmt = db.prepare(
     `SELECT * FROM campaigns WHERE status IN ('pending','processing') AND scheduled_time <= ? ORDER BY scheduled_time`,
   );
@@ -125,6 +132,68 @@ export function createCampaignsStore(db, deps = {}) {
     },
 
     /**
+     * Partial merge, only while the campaign is still 'pending' -- once
+     * ensureRecipients has flipped it to 'processing' the scheduler may
+     * already be mid-send, so editing after that point is refused rather
+     * than racing it.
+     * @param {string} tenantId
+     * @param {string} campaignId
+     * @param {{ name?: string, message?: string, sendTo?: string, scheduledTime?: string|Date }} [input]
+     */
+    updateCampaign(tenantId, campaignId, { name, message, sendTo, scheduledTime } = {}) {
+      const existing = getCampaignStmt.get(tenantId, campaignId);
+      if (!existing) throw new Error('campaign not found');
+      if (existing.status !== 'pending') throw new Error('only a pending campaign can be edited');
+
+      const nextName = name !== undefined ? name : existing.name;
+      if (typeof nextName !== 'string' || nextName.trim() === '') throw new Error('name is required');
+
+      const nextSendTo = sendTo !== undefined ? sendTo : existing.send_to;
+      if (nextSendTo !== 'all' && !findContactStmt.get(tenantId, nextSendTo)) {
+        throw new Error(`sendTo "${nextSendTo}" is not a known contact for this tenant`);
+      }
+
+      const nextMessage = message !== undefined ? sanitiseText(message, MAX_MESSAGE_LEN) : existing.message;
+      if (nextMessage === '') throw new Error('message must not be empty');
+
+      let nextScheduledIso = existing.scheduled_time;
+      if (scheduledTime !== undefined) {
+        const schedDate = new Date(scheduledTime);
+        if (Number.isNaN(schedDate.getTime())) throw new Error(`invalid scheduledTime: ${scheduledTime}`);
+        nextScheduledIso = schedDate.toISOString();
+      }
+
+      updateCampaignStmt.run(nextName, nextMessage, nextSendTo, nextScheduledIso, tenantId, campaignId);
+      return toCampaign(getCampaignStmt.get(tenantId, campaignId));
+    },
+
+    /**
+     * Only while still 'pending', same boundary as updateCampaign.
+     * @param {string} tenantId
+     * @param {string} campaignId
+     */
+    cancelCampaign(tenantId, campaignId) {
+      const existing = getCampaignStmt.get(tenantId, campaignId);
+      if (!existing) throw new Error('campaign not found');
+      if (existing.status !== 'pending') throw new Error('only a pending campaign can be cancelled');
+
+      cancelCampaignStmt.run(tenantId, campaignId);
+      return toCampaign(getCampaignStmt.get(tenantId, campaignId));
+    },
+
+    /**
+     * Per-recipient outcomes for one campaign (send status/error/timestamp).
+     * @param {string} tenantId
+     * @param {string} campaignId
+     * @returns {ReturnType<typeof toRecipient>[]|null} null if the campaign doesn't belong to this tenant.
+     */
+    listRecipients(tenantId, campaignId) {
+      const campaign = getCampaignStmt.get(tenantId, campaignId);
+      if (!campaign) return null;
+      return recipientsForCampaignStmt.all(campaignId).map(toRecipient);
+    },
+
+    /**
      * Idempotent: safe to call every tick. Resolves `sendTo` against the
      * tenant's current contacts and inserts any recipient rows not yet present.
      * @param {string} campaignId
@@ -135,6 +204,20 @@ export function createCampaignsStore(db, deps = {}) {
       setProcessingStmt.run(campaignId);
 
       const already = new Set(existingRecipientContactIdsStmt.all(campaignId).map((r) => r.contact_id));
+
+      // A single-contact campaign whose target no longer exists (e.g. the
+      // contact was deleted after scheduling but before this campaign became
+      // due -- deleting a contact is only blocked once it already HAS
+      // recipient rows, i.e. after this point). already.size === 0 scopes
+      // this to that first-ever tick only: fail explicitly here rather than
+      // silently leaving the campaign at 'processing' with zero recipients
+      // forever (recomputeCampaignStatus never fires on an empty list, and a
+      // non-pending campaign can no longer be edited or cancelled either).
+      if (sendTo !== 'all' && already.size === 0 && !findContactStmt.get(tenantId, sendTo)) {
+        setCampaignFailedStmt.run('target contact no longer exists', campaignId);
+        return;
+      }
+
       const targets = sendTo === 'all' ? tenantContactsStmt.all(tenantId) : [findContactStmt.get(tenantId, sendTo)].filter(Boolean);
 
       for (const target of targets) {

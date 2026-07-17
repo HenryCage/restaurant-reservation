@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { createDb } from '../src/db.js';
 import { createContactsStore } from '../src/contacts.js';
+import { createCampaignsStore } from '../src/campaigns.js';
 
 function makeStore() {
   const db = createDb(':memory:');
@@ -102,6 +103,90 @@ describe('createContactsStore', () => {
       const list = store.listContacts('t1');
       expect(list).toHaveLength(1);
       expect(list[0].name).toBe('Ada');
+    });
+  });
+
+  describe('updateContact', () => {
+    it('updates only the given fields, leaving the rest untouched', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '+2348012345678', tags: ['vip'] });
+      const updated = store.updateContact('t1', c.id, { name: 'Ada Lovelace' });
+      expect(updated).toMatchObject({ name: 'Ada Lovelace', phone: '+2348012345678', tags: ['vip'] });
+    });
+
+    it('re-normalises and validates a new phone', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const updated = store.updateContact('t1', c.id, { phone: '60012345', countryCode: '370' });
+      expect(updated.phone).toBe('+37060012345');
+    });
+
+    it('rejects an invalid new phone', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      expect(() => store.updateContact('t1', c.id, { phone: 'not-a-phone' })).toThrow(/invalid phone/);
+    });
+
+    it('rejects a new phone that collides with another contact in the same tenant', () => {
+      const store = makeStore();
+      store.createContact('t1', { name: 'Bola', phone: '+2348023456789' });
+      const ada = store.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      expect(() => store.updateContact('t1', ada.id, { phone: '+2348023456789' })).toThrow(/already exists/);
+    });
+
+    it('allows re-saving the same phone unchanged (no false collision with itself)', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const updated = store.updateContact('t1', c.id, { phone: '+2348012345678', name: 'Ada 2' });
+      expect(updated.name).toBe('Ada 2');
+    });
+
+    it('throws when the contact does not exist for this tenant', () => {
+      const store = makeStore();
+      expect(() => store.updateContact('t1', 'nonexistent', { name: 'x' })).toThrow(/not found/);
+    });
+
+    it('does not leak across tenants', () => {
+      const store = makeStore();
+      const c = store.createContact('t2', { name: 'Bola', phone: '+2348023456789' });
+      expect(() => store.updateContact('t1', c.id, { name: 'x' })).toThrow(/not found/);
+    });
+  });
+
+  describe('deleteContact', () => {
+    it('deletes an existing contact and returns true', () => {
+      const store = makeStore();
+      const c = store.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      expect(store.deleteContact('t1', c.id)).toBe(true);
+      expect(store.listContacts('t1')).toHaveLength(0);
+    });
+
+    it('returns false for a nonexistent contact', () => {
+      const store = makeStore();
+      expect(store.deleteContact('t1', 'nonexistent')).toBe(false);
+    });
+
+    it('does not delete across tenants', () => {
+      const store = makeStore();
+      const c = store.createContact('t2', { name: 'Bola', phone: '+2348023456789' });
+      expect(store.deleteContact('t1', c.id)).toBe(false);
+      expect(store.listContacts('t2')).toHaveLength(1);
+    });
+
+    it('refuses to delete a contact with existing campaign history, with a clear error', () => {
+      // better-sqlite3 enforces campaign_recipients.contact_id's FK by
+      // default -- a contact that was ever targeted by a campaign can't be
+      // hard-deleted, since its send history must survive. Needs a shared db
+      // (not makeStore()'s isolated one) so a campaigns store can reference it.
+      const db = createDb(':memory:');
+      const contacts = createContactsStore(db);
+      const campaigns = createCampaignsStore(db);
+      const ada = contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.ensureRecipients(c.id, 't1', 'all');
+
+      expect(() => contacts.deleteContact('t1', ada.id)).toThrow(/existing campaign history/);
+      expect(contacts.listContacts('t1')).toHaveLength(1); // not deleted
     });
   });
 });

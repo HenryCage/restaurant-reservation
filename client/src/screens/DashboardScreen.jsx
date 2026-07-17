@@ -4,6 +4,7 @@ import ContactsPanel from '../components/ContactsPanel.jsx';
 import CampaignForm from '../components/CampaignForm.jsx';
 import CampaignHistory from '../components/CampaignHistory.jsx';
 import OrdersTable from '../components/OrdersTable.jsx';
+import SendStatusBanner from '../components/SendStatusBanner.jsx';
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -22,6 +23,8 @@ function DashboardScreen({ api, onLogout, onBackToTenants }) {
   const [contacts, setContacts] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
   const [error, setError] = useState(null);
+  const [editingCampaign, setEditingCampaign] = useState(null);
+  const [sendStatus, setSendStatus] = useState(null);
 
   const fetchStats = useCallback(async () => {
     try {
@@ -37,11 +40,28 @@ function DashboardScreen({ api, onLogout, onBackToTenants }) {
     }
   }, [api]);
 
+  // Separate from fetchStats/error above: this is a secondary informational
+  // banner (why messages might not really be sending), not core dashboard
+  // data -- a failure here should not block the rest of the dashboard.
+  const fetchSendStatus = useCallback(async () => {
+    try {
+      setSendStatus(await api.get('/api/status'));
+    } catch {
+      // Silent -- next poll retries; the banner just stays hidden until then.
+    }
+  }, [api]);
+
   useEffect(() => {
     fetchStats();
     const interval = setInterval(fetchStats, POLL_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [fetchStats]);
+
+  useEffect(() => {
+    fetchSendStatus();
+    const interval = setInterval(fetchSendStatus, POLL_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [fetchSendStatus]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-6 md:p-12 font-sans">
@@ -67,6 +87,14 @@ function DashboardScreen({ api, onLogout, onBackToTenants }) {
           </div>
         </div>
 
+        {sendStatus && (
+          <SendStatusBanner
+            providerConfigured={sendStatus.providerConfigured}
+            dryRun={sendStatus.dryRun}
+            testOverrideActive={sendStatus.testOverrideActive}
+          />
+        )}
+
         {error ? (
           <div className="p-4 rounded-xl border bg-rose-50 border-rose-200 text-rose-800 text-sm font-medium">
             {error}
@@ -77,8 +105,14 @@ function DashboardScreen({ api, onLogout, onBackToTenants }) {
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-6">
-                <CampaignForm api={api} contacts={contacts} onCreated={fetchStats} />
-                <CampaignHistory api={api} contacts={contacts} />
+                <CampaignForm
+                  api={api}
+                  contacts={contacts}
+                  onCreated={fetchStats}
+                  editingCampaign={editingCampaign}
+                  onCancelEdit={() => setEditingCampaign(null)}
+                />
+                <CampaignHistory api={api} contacts={contacts} onEdit={setEditingCampaign} />
               </div>
               <div className="space-y-6">
                 <ContactsPanel api={api} />

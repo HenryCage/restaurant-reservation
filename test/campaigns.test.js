@@ -124,6 +124,42 @@ describe('createCampaignsStore', () => {
       const row = db.prepare('SELECT status FROM campaigns WHERE id = ?').get(c.id);
       expect(row.status).toBe('processing');
     });
+
+    it('fails the campaign immediately if its single target contact no longer exists, instead of getting stuck in "processing" forever', () => {
+      const { contacts, campaigns, db } = makeStores();
+      const ada = contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Solo', message: 'hi', sendTo: ada.id, scheduledTime: '2025-01-01T00:00:00.000Z' });
+      // No recipient rows exist yet (ensureRecipients hasn't run), so deleting
+      // the contact this early is not blocked by the FK guard in contacts.js.
+      contacts.deleteContact('t1', ada.id);
+
+      campaigns.ensureRecipients(c.id, 't1', ada.id);
+
+      const row = db.prepare('SELECT status, error FROM campaigns WHERE id = ?').get(c.id);
+      expect(row.status).toBe('failed');
+      expect(row.error).toMatch(/no longer exists/);
+      expect(campaigns.pendingRecipients(c.id, 10)).toHaveLength(0);
+    });
+
+    it('is idempotent on a "failed" campaign -- a later call does not resurrect or re-fail it', () => {
+      const { contacts, campaigns, db } = makeStores();
+      const ada = contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Solo', message: 'hi', sendTo: ada.id, scheduledTime: '2025-01-01T00:00:00.000Z' });
+      contacts.deleteContact('t1', ada.id);
+      campaigns.ensureRecipients(c.id, 't1', ada.id);
+
+      campaigns.ensureRecipients(c.id, 't1', ada.id);
+      const row = db.prepare('SELECT status FROM campaigns WHERE id = ?').get(c.id);
+      expect(row.status).toBe('failed');
+    });
+
+    it('does not affect a sendTo of "all" even with zero contacts', () => {
+      const { campaigns, db } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.ensureRecipients(c.id, 't1', 'all');
+      const row = db.prepare('SELECT status FROM campaigns WHERE id = ?').get(c.id);
+      expect(row.status).toBe('processing'); // not 'failed' -- "all" with an empty contact list is not an error
+    });
   });
 
   describe('pendingRecipients', () => {
@@ -188,6 +224,95 @@ describe('createCampaignsStore', () => {
       campaigns.recordRecipientResult(r2.id, { status: 'failed', error: 'x' });
       campaigns.recomputeCampaignStatus(c.id);
       expect(db.prepare('SELECT status FROM campaigns WHERE id = ?').get(c.id).status).toBe('partial');
+    });
+  });
+
+  describe('updateCampaign', () => {
+    it('updates only the given fields while still pending', () => {
+      const { campaigns } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2099-01-01T00:00:00.000Z' });
+      const updated = campaigns.updateCampaign('t1', c.id, { name: 'Promo v2' });
+      expect(updated).toMatchObject({ name: 'Promo v2', message: 'hi', sendTo: 'all' });
+    });
+
+    it('re-validates a new sendTo against this tenant\'s contacts', () => {
+      const { contacts, campaigns } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2099-01-01T00:00:00.000Z' });
+      expect(() => campaigns.updateCampaign('t1', c.id, { sendTo: 'nonexistent' })).toThrow(/not a known contact/);
+
+      const ada = contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const updated = campaigns.updateCampaign('t1', c.id, { sendTo: ada.id });
+      expect(updated.sendTo).toBe(ada.id);
+    });
+
+    it('rejects an empty message and an invalid scheduledTime', () => {
+      const { campaigns } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2099-01-01T00:00:00.000Z' });
+      expect(() => campaigns.updateCampaign('t1', c.id, { message: '   ' })).toThrow(/message/);
+      expect(() => campaigns.updateCampaign('t1', c.id, { scheduledTime: 'not-a-date' })).toThrow(/scheduledTime/);
+    });
+
+    it('refuses to edit a campaign that is no longer pending', () => {
+      const { contacts, campaigns } = makeStores();
+      contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.ensureRecipients(c.id, 't1', 'all'); // flips to 'processing'
+      expect(() => campaigns.updateCampaign('t1', c.id, { name: 'x' })).toThrow(/only a pending campaign/);
+    });
+
+    it('throws when the campaign does not exist for this tenant', () => {
+      const { campaigns } = makeStores();
+      expect(() => campaigns.updateCampaign('t1', 'nonexistent', { name: 'x' })).toThrow(/not found/);
+    });
+  });
+
+  describe('cancelCampaign', () => {
+    it('cancels a pending campaign', () => {
+      const { campaigns } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2099-01-01T00:00:00.000Z' });
+      const cancelled = campaigns.cancelCampaign('t1', c.id);
+      expect(cancelled.status).toBe('cancelled');
+    });
+
+    it('a cancelled campaign is no longer picked up as due', () => {
+      const { campaigns } = makeStores();
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.cancelCampaign('t1', c.id);
+      expect(campaigns.listDueCampaigns(new Date('2026-01-01T00:00:00.000Z'))).toHaveLength(0);
+    });
+
+    it('refuses to cancel a campaign that is no longer pending', () => {
+      const { contacts, campaigns } = makeStores();
+      contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.ensureRecipients(c.id, 't1', 'all');
+      expect(() => campaigns.cancelCampaign('t1', c.id)).toThrow(/only a pending campaign/);
+    });
+
+    it('throws when the campaign does not exist for this tenant', () => {
+      const { campaigns } = makeStores();
+      expect(() => campaigns.cancelCampaign('t1', 'nonexistent')).toThrow(/not found/);
+    });
+  });
+
+  describe('listRecipients', () => {
+    it('returns per-recipient outcomes for a campaign', () => {
+      const { contacts, campaigns } = makeStores();
+      contacts.createContact('t1', { name: 'Ada', phone: '+2348012345678' });
+      const c = campaigns.createCampaign('t1', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      campaigns.ensureRecipients(c.id, 't1', 'all');
+      const [r1] = campaigns.pendingRecipients(c.id, 10);
+      campaigns.recordRecipientResult(r1.id, { status: 'failed', error: 'invalid number' });
+
+      const recipients = campaigns.listRecipients('t1', c.id);
+      expect(recipients).toHaveLength(1);
+      expect(recipients[0]).toMatchObject({ phone: '+2348012345678', status: 'failed', error: 'invalid number' });
+    });
+
+    it('returns null for a campaign that does not belong to this tenant', () => {
+      const { campaigns } = makeStores();
+      const c = campaigns.createCampaign('t2', { name: 'Promo', message: 'hi', sendTo: 'all', scheduledTime: '2025-01-01T00:00:00.000Z' });
+      expect(campaigns.listRecipients('t1', c.id)).toBeNull();
     });
   });
 });

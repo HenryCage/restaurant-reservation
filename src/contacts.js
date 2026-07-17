@@ -49,6 +49,8 @@ export function createContactsStore(db, deps = {}) {
   const findByPhoneStmt = db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND phone = ?');
   const findByIdStmt = db.prepare('SELECT * FROM contacts WHERE tenant_id = ? AND id = ?');
   const listStmt = db.prepare('SELECT * FROM contacts WHERE tenant_id = ? ORDER BY created_at');
+  const updateStmt = db.prepare('UPDATE contacts SET name = ?, phone = ?, tags = ? WHERE tenant_id = ? AND id = ?');
+  const deleteStmt = db.prepare('DELETE FROM contacts WHERE tenant_id = ? AND id = ?');
 
   return {
     /**
@@ -101,6 +103,60 @@ export function createContactsStore(db, deps = {}) {
     getContact(tenantId, contactId) {
       const row = findByIdStmt.get(tenantId, contactId);
       return row ? toContact(row) : null;
+    },
+
+    /**
+     * Partial merge, like tenants.update() -- only fields present in `input`
+     * change. Re-validates/re-normalises phone only if a new one is given.
+     * @param {string} tenantId
+     * @param {string} contactId
+     * @param {{ name?: string, phone?: string, tags?: string[], countryCode?: string }} [input]
+     * @returns {Contact}
+     */
+    updateContact(tenantId, contactId, { name, phone, tags, countryCode } = {}) {
+      const existing = findByIdStmt.get(tenantId, contactId);
+      if (!existing) throw new Error('contact not found');
+
+      const nextName = name !== undefined ? name : existing.name;
+
+      let nextPhone = existing.phone;
+      if (phone !== undefined) {
+        const cc = typeof countryCode === 'string' && countryCode.trim() !== '' ? countryCode : defaultCountryCode;
+        const e164 = normalisePhone(phone, cc);
+        if (!e164) throw new Error(`invalid phone: ${phone}`);
+        if (e164 !== existing.phone) {
+          const dup = findByPhoneStmt.get(tenantId, e164);
+          if (dup) throw new Error(`a contact with phone ${e164} already exists for this tenant`);
+        }
+        nextPhone = e164;
+      }
+
+      const nextTags = tags !== undefined ? tags : JSON.parse(existing.tags);
+
+      updateStmt.run(nextName, nextPhone, JSON.stringify(nextTags), tenantId, contactId);
+      return toContact(findByIdStmt.get(tenantId, contactId));
+    },
+
+    /**
+     * @param {string} tenantId
+     * @param {string} contactId
+     * @returns {boolean} whether a row was actually deleted.
+     */
+    deleteContact(tenantId, contactId) {
+      try {
+        return deleteStmt.run(tenantId, contactId).changes > 0;
+      } catch (err) {
+        // better-sqlite3 enables FK enforcement by default (unlike plain
+        // SQLite): campaign_recipients.contact_id references this row, so a
+        // contact that has ever been targeted by a campaign can't be hard-
+        // deleted -- their send history (its own phone/status snapshot,
+        // independent of this row) must survive. Translate the raw
+        // constraint error into something the HTTP layer/UI can act on.
+        if (err.code === 'SQLITE_CONSTRAINT_FOREIGNKEY') {
+          throw new Error('cannot delete a contact with existing campaign history');
+        }
+        throw err;
+      }
     },
   };
 }

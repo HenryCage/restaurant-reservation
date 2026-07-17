@@ -2,7 +2,13 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import DashboardScreen from './DashboardScreen.jsx';
 
-function makeApi({ contacts = [], campaigns = [], orders = [], failContacts = false } = {}) {
+function makeApi({
+  contacts = [],
+  campaigns = [],
+  orders = [],
+  failContacts = false,
+  sendStatus = { providerConfigured: true, dryRun: false, testOverrideActive: false },
+} = {}) {
   return {
     get: vi.fn(async (path) => {
       if (path === '/api/contacts') {
@@ -11,6 +17,7 @@ function makeApi({ contacts = [], campaigns = [], orders = [], failContacts = fa
       }
       if (path === '/api/campaigns') return campaigns;
       if (path === '/api/orders') return orders;
+      if (path === '/api/status') return sendStatus;
       throw new Error(`unexpected path: ${path}`);
     }),
     post: vi.fn(),
@@ -20,7 +27,7 @@ function makeApi({ contacts = [], campaigns = [], orders = [], failContacts = fa
 describe('DashboardScreen', () => {
   it('renders all five regions given mocked api responses', async () => {
     const api = makeApi({
-      contacts: [{ id: 'c1', name: 'Ada', phone: '+2348012345678' }],
+      contacts: [{ id: 'c1', name: 'Ada', phone: '+2348012345678', tags: [] }],
       campaigns: [{ id: 'camp1', name: 'Promo', sendTo: 'all', scheduledTime: '2026-01-01T00:00:00.000Z', status: 'sent' }],
       orders: [{ rowNumber: 2, orderId: 'O1', name: 'Ada', phone: '+2348012345678', status: 'Delivered', lastNotifiedStatus: 'delivered', lastError: '' }],
     });
@@ -53,5 +60,17 @@ describe('DashboardScreen', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /tenants/i }));
     expect(onBackToTenants).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows no send-status banner when everything is configured normally', async () => {
+    render(<DashboardScreen api={makeApi()} onLogout={vi.fn()} />);
+    await screen.findByRole('heading', { name: 'SMS Dispatch' });
+    expect(screen.queryByText(/No SMS provider configured/)).not.toBeInTheDocument();
+  });
+
+  it('shows the send-status banner when no SMS provider is configured', async () => {
+    const api = makeApi({ sendStatus: { providerConfigured: false, dryRun: false, testOverrideActive: false } });
+    render(<DashboardScreen api={api} onLogout={vi.fn()} />);
+    expect(await screen.findByText(/No SMS provider configured/)).toBeInTheDocument();
   });
 });

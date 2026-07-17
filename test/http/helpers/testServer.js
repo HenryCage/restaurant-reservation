@@ -22,6 +22,8 @@ export function baseTestConfig(overrides = {}) {
     loginRateLimitMax: 10,
     loginRateLimitWindowMinutes: 15,
     defaultCountryCode: '234',
+    dryRun: false,
+    effectiveGlobalTestNumber: '',
     ...overrides,
   };
 }

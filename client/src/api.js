@@ -68,5 +68,9 @@ export function createApiClient({ baseUrl = '', onUnauthorized, tenantId } = {})
     patch(path, body) {
       return request(path, { method: 'PATCH', body: JSON.stringify(body) });
     },
+    /** @param {string} path */
+    delete(path) {
+      return request(path, { method: 'DELETE' });
+    },
   };
 }

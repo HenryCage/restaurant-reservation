@@ -75,6 +75,17 @@ describe('createApiClient', () => {
     expect(JSON.parse(options.body)).toEqual({ name: 'Renamed' });
   });
 
+  it('sends no body for delete()', async () => {
+    const fetchMock = mockFetchOnce({ status: 204, json: {} });
+    const api = createApiClient();
+    await api.delete('/api/contacts/c1');
+
+    const [url, options] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/contacts/c1');
+    expect(options.method).toBe('DELETE');
+    expect(options.headers['Content-Type']).toBeUndefined();
+  });
+
   describe('tenantId (superadmin)', () => {
     it('appends ?tenantId= to a path with no existing query string', async () => {
       const fetchMock = mockFetchOnce({ status: 200, json: [] });
