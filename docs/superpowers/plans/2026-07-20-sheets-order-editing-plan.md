@@ -1,10 +1,20 @@
 # Implementation plan: Sheets-mode order editing
 
 Spec: `docs/superpowers/specs/2026-07-20-sheets-order-editing-design.md`
-Status: Steps 1-4 implemented (358 backend tests, 144 client tests, `npm run
-build` all green). Step 5 (live smoke check) blocked -- needs a real Google
-service-account credential and a real sheet; the current `.env` only has
-placeholder Google credentials.
+Status: implemented (all 5 steps). Steps 1-4: 358 backend tests, 144 client
+tests, `npm run build` all green. Step 5: `.env`'s Google credentials turned
+out to already be real (matching the gitignored
+`sms-logistics-demo-45a31aed177f.json` service-account key sitting in the
+repo root, not placeholders as first assumed) and already have access to the
+real Swift Logistics sheet (`1gSNJzaYJbSQ0mS_qdk18yCC0z9HfhV9VJH8ahfG4Tkc`).
+Ran a scratch-order round-trip directly against `sheets.js` (append → read
+back → edit a field → read back → delete via a one-off raw
+`deleteDimension` call, since delete isn't and shouldn't be part of the
+app itself): every step matched expectations, sheet left exactly as found
+(3 rows). Deliberately did not exercise an actual SMS send as part of this
+check (used a status outside Swift Logistics' `notifyStatuses`, and no
+`processor.js` tick was running anyway) to avoid a real message going out
+to a fake test phone number.
 
 (Note: the `writing-plans` skill referenced by the brainstorming skill isn't
 installed in this environment -- only `brainstorming` and
