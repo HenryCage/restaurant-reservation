@@ -8,6 +8,7 @@
 // back only the three service-owned cells per row (never row-level writes).
 
 import { google } from 'googleapis';
+import { randomInt } from 'node:crypto';
 
 const SPREADSHEET_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
@@ -173,6 +174,103 @@ export function buildWriteData(sheetName, rowNumber, colIndex, fields) {
   return data;
 }
 
+const ORDER_ID_SUFFIX_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+
+/** @returns {string} 4 random uppercase alphanumeric characters. */
+function defaultRandomSuffix() {
+  let s = '';
+  for (let i = 0; i < 4; i++) s += ORDER_ID_SUFFIX_CHARS[randomInt(ORDER_ID_SUFFIX_CHARS.length)];
+  return s;
+}
+
+/**
+ * Generate a new Order ID for a UI-created order: `ORD-YYYYMMDD-XXXX` (4
+ * random uppercase alphanumeric characters). Retries on a collision against
+ * `existingIds` (astronomically unlikely, capped so a pathological test
+ * can never loop forever) -- Order ID is immutable and must be unique
+ * within the sheet once assigned (Sheets-mode order editing spec).
+ * @param {Set<string>|string[]} existingIds
+ * @param {{ now?: () => Date, randomSuffix?: () => string }} [deps]
+ * @returns {string}
+ */
+export function generateOrderId(existingIds, deps = {}) {
+  const now = deps.now ?? (() => new Date());
+  const randomSuffix = deps.randomSuffix ?? defaultRandomSuffix;
+  const existing = existingIds instanceof Set ? existingIds : new Set(existingIds);
+
+  const d = now();
+  const yyyymmdd =
+    String(d.getUTCFullYear()) +
+    String(d.getUTCMonth() + 1).padStart(2, '0') +
+    String(d.getUTCDate()).padStart(2, '0');
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const id = `ORD-${yyyymmdd}-${randomSuffix()}`;
+    if (!existing.has(id)) return id;
+  }
+  throw new Error('failed to generate a unique order id after 20 attempts');
+}
+
+/**
+ * Build a single sparse row for a new-order `values.append` call: one
+ * element longer than the highest column index in `colIndex`, each `fields`
+ * value placed at its mapped position, blank string everywhere else. A
+ * `fields` key with no matching `colIndex` entry (e.g. this tenant's sheet
+ * has no "Amount" column) is silently ignored.
+ * @param {Record<string, number>} colIndex
+ * @param {Record<string, string>} fields
+ * @returns {string[]}
+ */
+export function buildAppendData(colIndex, fields) {
+  const maxIndex = Math.max(-1, ...Object.values(colIndex));
+  const row = new Array(maxIndex + 1).fill('');
+  for (const [field, value] of Object.entries(fields)) {
+    const idx = colIndex[field];
+    if (idx === undefined) continue;
+    row[idx] = value ?? '';
+  }
+  return row;
+}
+
+/**
+ * Like buildWriteData, but for any order-data field present in `fields`
+ * (Order ID/Name/Phone/Amount/Status), not just the fixed SERVICE_FIELDS
+ * list. Kept as a separate function rather than widening buildWriteData
+ * itself, so the notification engine's own write-back stays exactly as
+ * narrowly scoped as it is today -- this is a distinct, HTTP-triggered path
+ * (Sheets-mode order editing spec).
+ * @param {string} sheetName
+ * @param {number} rowNumber
+ * @param {Record<string, number>} colIndex
+ * @param {Record<string, string>} fields
+ * @returns {{ range: string, values: string[][] }[]}
+ */
+export function buildOrderWriteData(sheetName, rowNumber, colIndex, fields) {
+  const data = [];
+  for (const [field, value] of Object.entries(fields)) {
+    const idx = colIndex[field];
+    if (idx === undefined) continue;
+    const range = `${quoteSheetName(sheetName)}!${columnIndexToLetter(idx)}${rowNumber}`;
+    data.push({ range, values: [[value ?? '']] });
+  }
+  return data;
+}
+
+/**
+ * Extract the 1-based row number Sheets actually inserted into, from a
+ * `values.append` response's `updates.updatedRange` (e.g. "Orders!A5:E5" or
+ * "'My Sheet'!A5:E5"). More reliable than guessing client-side from the
+ * parsed row count, since `INSERT_ROWS` appends after the last row with
+ * *any* data in the target range -- which can differ if trailing junk rows
+ * exist below the last row `parseOrders` considered valid.
+ * @param {string} updatedRange
+ * @returns {number|null}
+ */
+export function parseAppendedRowNumber(updatedRange) {
+  const match = /![A-Za-z]+(\d+)/.exec(updatedRange ?? '');
+  return match ? Number(match[1]) : null;
+}
+
 /**
  * Create an authenticated Sheets client with readOrders/writeRow.
  * @param {import('./config.js').Config} config
@@ -215,6 +313,48 @@ export function createSheetsClient(config, deps = {}) {
      */
     async writeRow(sheetId, sheetName, rowNumber, colIndex, fields) {
       const data = buildWriteData(sheetName, rowNumber, colIndex, fields);
+      if (data.length === 0) return;
+      await sheetsApi.spreadsheets.values.batchUpdate({
+        spreadsheetId: sheetId,
+        requestBody: { valueInputOption: 'RAW', data },
+      });
+    },
+
+    /**
+     * Append a brand-new order row (Sheets-mode order editing). Leaves the
+     * service columns (Last Notified Status/Notified At/Last Error) blank,
+     * so a subsequent processor tick treats it exactly like a row a person
+     * typed in by hand.
+     * @param {string} sheetId
+     * @param {string} sheetName
+     * @param {Record<string, number>} colIndex
+     * @param {Record<string, string>} fields
+     */
+    async appendOrder(sheetId, sheetName, colIndex, fields) {
+      const values = buildAppendData(colIndex, fields);
+      const res = await sheetsApi.spreadsheets.values.append({
+        spreadsheetId: sheetId,
+        range: quoteSheetName(sheetName),
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [values] },
+      });
+      return { rowNumber: parseAppendedRowNumber(res?.data?.updates?.updatedRange) };
+    },
+
+    /**
+     * Write any order-data field(s) for one existing row (cell-scoped, like
+     * writeRow, but for Name/Phone/Amount/Status rather than the fixed
+     * service columns). A distinct, HTTP-triggered path from writeRow --
+     * the notification engine's own write-back never widens because of this.
+     * @param {string} sheetId
+     * @param {string} sheetName
+     * @param {number} rowNumber
+     * @param {Record<string, number>} colIndex
+     * @param {Record<string, string>} fields
+     */
+    async writeOrderFields(sheetId, sheetName, rowNumber, colIndex, fields) {
+      const data = buildOrderWriteData(sheetName, rowNumber, colIndex, fields);
       if (data.length === 0) return;
       await sheetsApi.spreadsheets.values.batchUpdate({
         spreadsheetId: sheetId,

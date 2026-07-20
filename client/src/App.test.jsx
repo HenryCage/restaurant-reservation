@@ -35,6 +35,7 @@ describe('App — auth state machine driven by GET /auth/me', () => {
   it('renders DashboardScreen for a normal, non-gated tenant user', async () => {
     global.fetch.mockImplementation(async (url) => {
       if (url === '/auth/me') return jsonResponse(200, { mustChangePassword: false, tenantId: 't1', isSuperadmin: false });
+      if (url === '/api/orders') return jsonResponse(200, { rows: [], columns: [], notifyStatuses: [] });
       return jsonResponse(200, []); // DashboardScreen's own contacts/campaigns fetch
     });
     render(<App />);

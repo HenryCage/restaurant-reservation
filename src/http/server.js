@@ -61,7 +61,7 @@ export function createHttpServer({
   const apiRequireAuth = createRequireAuth({ authStore });
   app.use('/api/contacts', createContactsRoutes({ requireAuth: apiRequireAuth, contactsStore }));
   app.use('/api/campaigns', createCampaignsRoutes({ requireAuth: apiRequireAuth, campaignsStore }));
-  app.use('/api/orders', createOrdersRoutes({ requireAuth: apiRequireAuth, registry, sheets }));
+  app.use('/api/orders', createOrdersRoutes({ requireAuth: apiRequireAuth, registry, sheets, config }));
   app.use('/api/status', createStatusRoutes({ requireAuth: apiRequireAuth, registry, config }));
 
   const requireSuperadmin = createRequireSuperadmin({ authStore });

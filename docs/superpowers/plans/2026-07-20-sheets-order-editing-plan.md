@@ -1,7 +1,10 @@
 # Implementation plan: Sheets-mode order editing
 
 Spec: `docs/superpowers/specs/2026-07-20-sheets-order-editing-design.md`
-Status: not started.
+Status: Steps 1-4 implemented (358 backend tests, 144 client tests, `npm run
+build` all green). Step 5 (live smoke check) blocked -- needs a real Google
+service-account credential and a real sheet; the current `.env` only has
+placeholder Google credentials.
 
 (Note: the `writing-plans` skill referenced by the brainstorming skill isn't
 installed in this environment -- only `brainstorming` and

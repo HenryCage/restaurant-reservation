@@ -16,7 +16,7 @@ function makeApi({
         return contacts;
       }
       if (path === '/api/campaigns') return campaigns;
-      if (path === '/api/orders') return orders;
+      if (path === '/api/orders') return { rows: orders, columns: ['orderId', 'name', 'phone', 'amount', 'status'], notifyStatuses: [] };
       if (path === '/api/status') return sendStatus;
       throw new Error(`unexpected path: ${path}`);
     }),
