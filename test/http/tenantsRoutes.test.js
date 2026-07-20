@@ -31,7 +31,6 @@ function tenantPayload(over = {}) {
     notifyStatuses: ['Out for delivery'],
     templates: { 'Out for delivery': 'Hi {name}' },
     testNumber: '',
-    syncContactsFromSheet: false,
     ...over,
   };
 }

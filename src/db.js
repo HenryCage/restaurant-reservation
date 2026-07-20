@@ -72,7 +72,6 @@ CREATE TABLE IF NOT EXISTS tenants (
   notify_statuses_json     TEXT NOT NULL DEFAULT '[]',
   templates_json           TEXT NOT NULL DEFAULT '{}',
   test_number              TEXT NOT NULL DEFAULT '',
-  sync_contacts_from_sheet INTEGER NOT NULL DEFAULT 0,
   created_at               TEXT NOT NULL,
   updated_at               TEXT NOT NULL
 );

@@ -51,11 +51,12 @@ function main() {
   const contactsStore = createContactsStore(db, { defaultCountryCode: config.defaultCountryCode });
   const campaignsStore = createCampaignsStore(db);
 
-  // Opt-in sheet -> contacts sync (Foundation merge spec): processor.js itself
-  // never needs to know the opt-in flag exists, keeping its dependency surface
-  // unchanged -- this closure decides, and isolates its own failures.
-  function onNotified(tenant, contact) {
-    if (!tenant.syncContactsFromSheet) return;
+  // Sheet -> contacts sync: always on, for every tenant -- mirrors every
+  // scanned row's customer into contacts regardless of notify-status
+  // eligibility or send outcome. processor.js calls this once per row with a
+  // valid phone every tick; isolated here too so a DB failure can never
+  // affect sheet processing itself.
+  function onRow(tenant, contact) {
     try {
       contactsStore.upsertContact(tenant.id, contact);
     } catch (err) {
@@ -63,7 +64,7 @@ function main() {
     }
   }
 
-  const processor = createProcessor({ config, logger, registry, sheets, smsSenderFactory, onNotified });
+  const processor = createProcessor({ config, logger, registry, sheets, smsSenderFactory, onRow });
   const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, smsSenderFactory });
 
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });

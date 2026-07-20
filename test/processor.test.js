@@ -196,20 +196,21 @@ describe('processor — transient vs permanent failure', () => {
   });
 });
 
-describe('processor — onNotified hook', () => {
-  it('calls onNotified with (tenant, {name, phone}) on a successful send', async () => {
+describe('processor — onRow hook (sheet -> contacts sync)', () => {
+  it('calls onRow with (tenant, {name, phone}) for every scanned row with a valid phone', async () => {
     const tenants = buildTenants([rawTenant()]);
-    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    // Status does not match notifyStatuses -- proves onRow is independent of eligibility.
+    const sheets = makeSheets({ sheetA: { rows: [orderRow({ status: 'Processing' })] } });
     const sendSms = makeSendSms();
     const calls = [];
-    const onNotified = (tenant, contact) => calls.push({ tenant, contact });
+    const onRow = (tenant, contact) => calls.push({ tenant, contact });
     const processor = createProcessor({
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
       sheets: sheets.client,
       smsSenderFactory: makeSmsSenderFactory(sendSms),
-      onNotified,
+      onRow,
       now: FIXED_NOW,
     });
 
@@ -217,61 +218,82 @@ describe('processor — onNotified hook', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].tenant.id).toBe('a');
     expect(calls[0].contact).toEqual({ name: 'Chidi', phone: '+2348012345678' });
+    expect(sendSms.calls).toHaveLength(0); // never became eligible for a send
   });
 
-  it('is not called on a transient failure', async () => {
+  it('is still called when the row is otherwise eligible and the send fails (transient)', async () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms(() => ({ ok: false, permanent: false, error: 'network down' }));
     let callCount = 0;
-    const onNotified = () => callCount++;
+    const onRow = () => callCount++;
     const processor = createProcessor({
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
       sheets: sheets.client,
       smsSenderFactory: makeSmsSenderFactory(sendSms),
-      onNotified,
+      onRow,
       now: FIXED_NOW,
     });
 
     await processor.run();
-    expect(callCount).toBe(0);
+    expect(callCount).toBe(1);
   });
 
-  it('is not called on a permanent failure', async () => {
+  it('is still called when the send fails permanently', async () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms(() => ({ ok: false, permanent: true, error: 'invalid sender id' }));
     let callCount = 0;
-    const onNotified = () => callCount++;
+    const onRow = () => callCount++;
     const processor = createProcessor({
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
       sheets: sheets.client,
       smsSenderFactory: makeSmsSenderFactory(sendSms),
-      onNotified,
+      onRow,
       now: FIXED_NOW,
     });
 
     await processor.run();
-    expect(callCount).toBe(0);
+    expect(callCount).toBe(1);
   });
 
-  it('is not called during DRY_RUN', async () => {
+  it('is still called during DRY_RUN', async () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
     let callCount = 0;
-    const onNotified = () => callCount++;
+    const onRow = () => callCount++;
     const processor = createProcessor({
       config: baseConfig({ dryRun: true }),
       logger: silentLogger(),
       registry: { load: () => tenants },
       sheets: sheets.client,
       smsSenderFactory: makeSmsSenderFactory(sendSms),
-      onNotified,
+      onRow,
+      now: FIXED_NOW,
+    });
+
+    await processor.run();
+    expect(callCount).toBe(1);
+  });
+
+  it('is not called for a row with an invalid phone', async () => {
+    const tenants = buildTenants([rawTenant()]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow({ phone: 'not-a-phone' })] } });
+    const sendSms = makeSendSms();
+    let callCount = 0;
+    const onRow = () => callCount++;
+    const processor = createProcessor({
+      config: baseConfig(),
+      logger: silentLogger(),
+      registry: { load: () => tenants },
+      sheets: sheets.client,
+      smsSenderFactory: makeSmsSenderFactory(sendSms),
+      onRow,
       now: FIXED_NOW,
     });
 
@@ -279,11 +301,11 @@ describe('processor — onNotified hook', () => {
     expect(callCount).toBe(0);
   });
 
-  it('a throwing onNotified does not fail the row (write-back and summary still happen)', async () => {
+  it('a throwing onRow does not fail the tick (write-back and summary still happen)', async () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
-    const onNotified = () => {
+    const onRow = () => {
       throw new Error('contacts db is down');
     };
     const processor = createProcessor({
@@ -292,7 +314,7 @@ describe('processor — onNotified hook', () => {
       registry: { load: () => tenants },
       sheets: sheets.client,
       smsSenderFactory: makeSmsSenderFactory(sendSms),
-      onNotified,
+      onRow,
       now: FIXED_NOW,
     });
 
@@ -302,7 +324,7 @@ describe('processor — onNotified hook', () => {
     expect(sheets.writes[0].fields.lastNotifiedStatus).toBe('out for delivery');
   });
 
-  it('omitting onNotified entirely leaves behavior unchanged', async () => {
+  it('omitting onRow entirely leaves behavior unchanged', async () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();

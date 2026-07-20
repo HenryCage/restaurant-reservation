@@ -63,7 +63,6 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
   const [senderId, setSenderId] = useState(tenant?.senderId ?? '');
   const [channel, setChannel] = useState(tenant?.channel ?? 'dnd');
   const [testNumber, setTestNumber] = useState(tenant?.testNumber ?? '');
-  const [syncContactsFromSheet, setSyncContactsFromSheet] = useState(tenant?.syncContactsFromSheet ?? false);
   const [defaultCountryCode, setDefaultCountryCode] = useState(tenant?.defaultCountryCode ?? '');
   const [rows, setRows] = useState(initialRows(tenant));
   const [smsProvider, setSmsProvider] = useState(tenant?.smsProvider ?? '');
@@ -109,7 +108,6 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
       senderId,
       channel,
       testNumber,
-      syncContactsFromSheet,
       notifyStatuses,
       templates,
       smsProvider,
@@ -199,14 +197,6 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
                 Active
-              </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={syncContactsFromSheet}
-                  onChange={(e) => setSyncContactsFromSheet(e.target.checked)}
-                />
-                Sync contacts from sheet
               </label>
             </div>
           </div>

@@ -7,7 +7,10 @@
 //     crash/timeout can re-send at most one message, not a whole tenant's batch;
 //   - bulk-edit guardrail and transient/permanent failure handling (no Attempts
 //     column: a permanent failure marks the status, which un-parks on a Status change);
-//   - operator-visible logging plus a one-line per-tenant summary each tick.
+//   - operator-visible logging plus a one-line per-tenant summary each tick;
+//   - optional onRow(tenant, contact) hook fires once per scanned row with a
+//     valid phone, every tick, regardless of notify-status eligibility or
+//     send outcome (sheet -> contacts sync; see index.js).
 //
 // All I/O (registry, sheets, sendSms) is injected, so the whole loop is unit-tested
 // with mocks and never touches the network or googleapis.
@@ -27,13 +30,13 @@ import { maskPhone } from './logger.js';
  *     writeRow: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string,number>, fields: object) => Promise<void>,
  *   },
  *   smsSenderFactory: { forTenant: (tenant: import('./tenants.js').Tenant) => (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }> },
- *   onNotified?: (tenant: import('./tenants.js').Tenant, contact: { name: string, phone: string }) => void,
+ *   onRow?: (tenant: import('./tenants.js').Tenant, contact: { name: string, phone: string }) => void,
  *   now?: () => Date,
  *   sleep?: (ms: number) => Promise<void>,
  * }} deps
  */
 export function createProcessor(deps) {
-  const { config, logger, registry, sheets, smsSenderFactory, onNotified } = deps;
+  const { config, logger, registry, sheets, smsSenderFactory, onRow } = deps;
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? ((ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()));
 
@@ -97,6 +100,23 @@ export function createProcessor(deps) {
 
     const { colIndex, rows } = read;
     summary.scanned = rows.length;
+
+    // Sheet -> contacts sync: every scanned row's customer is mirrored into
+    // contacts, independent of notify-status eligibility or send outcome --
+    // a customer should exist in contacts as soon as their order appears in
+    // the sheet, not only once/if they get notified. Isolated per row so a
+    // hook failure can never affect sheet processing itself.
+    if (onRow) {
+      for (const row of rows) {
+        const e164 = normalisePhone(row.phone, countryCodeFor(tenant));
+        if (!e164) continue;
+        try {
+          onRow(tenant, { name: row.name, phone: e164 });
+        } catch (err) {
+          log.error('onRow hook failed (isolated)', { orderId: row.orderId, error: err?.message ?? String(err) });
+        }
+      }
+    }
 
     // Decide which rows need a message.
     const eligible = [];
@@ -190,21 +210,6 @@ export function createProcessor(deps) {
         status: row.status,
         providerMessageId: result.providerMessageId,
       });
-
-      // Optional, additive extension point (Foundation merge spec's "Sheet ->
-      // contacts sync"): only on a real successful send, never during a dry
-      // run, and isolated so a hook failure can never turn a successful
-      // notification into a failed tick.
-      if (onNotified && !config.dryRun) {
-        try {
-          onNotified(tenant, { name: row.name, phone: e164 });
-        } catch (err) {
-          log.error('onNotified hook failed (isolated)', {
-            orderId: row.orderId,
-            error: err?.message ?? String(err),
-          });
-        }
-      }
       return;
     }
 

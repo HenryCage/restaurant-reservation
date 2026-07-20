@@ -58,8 +58,8 @@ describe('createDb', () => {
   it('round-trips a row through tenants', () => {
     const db = createDb(':memory:');
     db.prepare(
-      `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
       'swift-logistics',
       'Swift Logistics',
@@ -71,7 +71,6 @@ describe('createDb', () => {
       '["Out for delivery"]',
       '{"Out for delivery":"Hi {name}"}',
       '',
-      0,
       '2026-01-01T00:00:00.000Z',
       '2026-01-01T00:00:00.000Z',
     );
@@ -101,8 +100,8 @@ describe('createDb', () => {
       const db1 = createDb(dbPath);
       db1.prepare('UPDATE tenants SET default_country_code = ? WHERE id = ?').run('370', 'nonexistent'); // no-op, just exercises the column exists
       db1.prepare(
-        `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, default_country_code, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, default_country_code, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         'lt-tenant',
         'Lithuania Tenant',
@@ -114,7 +113,6 @@ describe('createDb', () => {
         '["Out for delivery"]',
         '{"Out for delivery":"Hi {name}"}',
         '',
-        0,
         '370',
         '2026-01-01T00:00:00.000Z',
         '2026-01-01T00:00:00.000Z',
@@ -146,8 +144,8 @@ describe('createDb', () => {
 
       const db1 = createDb(dbPath);
       db1.prepare(
-        `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sms_provider, sms_credentials_json, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         'swift-logistics',
         'Swift Logistics',
@@ -159,7 +157,6 @@ describe('createDb', () => {
         '["Out for delivery"]',
         '{"Out for delivery":"Hi {name}"}',
         '',
-        0,
         'termii',
         '{"apiKey":"secret-key","baseUrl":"https://example.termii.com"}',
         '2026-01-01T00:00:00.000Z',

@@ -55,7 +55,6 @@ export function canonicalStatus(s) {
  * @property {string} senderId
  * @property {string} channel
  * @property {string} testNumber
- * @property {boolean} syncContactsFromSheet
  * @property {string[]} notifyStatuses
  * @property {Set<string>} notifyStatusesCanonical
  * @property {Record<string,string>} templates
@@ -137,9 +136,6 @@ export function validateTenant(raw, ctx, logger) {
     typeof raw.channel === 'string' && raw.channel.trim() !== '' ? raw.channel.trim() : DEFAULT_CHANNEL;
   const testNumber = typeof raw.testNumber === 'string' ? raw.testNumber.trim() : '';
   const name = typeof raw.name === 'string' && raw.name.trim() !== '' ? raw.name.trim() : id;
-  // Opt-in only: absent, wrong type, or any non-true value all default to false
-  // (Foundation merge spec's "Sheet -> contacts sync" section).
-  const syncContactsFromSheet = raw.syncContactsFromSheet === true;
 
   // Per-tenant SMS provider (no fallback to any global config -- an empty
   // provider is a valid "not configured yet" state, handled at send time,
@@ -176,7 +172,6 @@ export function validateTenant(raw, ctx, logger) {
     senderId,
     channel,
     testNumber,
-    syncContactsFromSheet,
     notifyStatuses,
     notifyStatusesCanonical,
     templates: { ...raw.templates },
@@ -287,7 +282,6 @@ function rowToRaw(row) {
     notifyStatuses: JSON.parse(row.notify_statuses_json),
     templates: JSON.parse(row.templates_json),
     testNumber: row.test_number,
-    syncContactsFromSheet: !!row.sync_contacts_from_sheet,
     smsProvider: row.sms_provider,
     smsCredentials: JSON.parse(row.sms_credentials_json),
     defaultCountryCode: row.default_country_code,
@@ -352,11 +346,11 @@ export function createTenantRegistry({ db, logger }) {
   const selectAllStmt = db.prepare('SELECT * FROM tenants');
   const selectOneStmt = db.prepare('SELECT * FROM tenants WHERE id = ?');
   const insertStmt = db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, default_country_code, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sms_provider, sms_credentials_json, default_country_code, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateStmt = db.prepare(
-    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sync_contacts_from_sheet = ?, sms_provider = ?, sms_credentials_json = ?, default_country_code = ?, updated_at = ?
+    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sms_provider = ?, sms_credentials_json = ?, default_country_code = ?, updated_at = ?
      WHERE id = ?`,
   );
 
@@ -415,7 +409,6 @@ export function createTenantRegistry({ db, logger }) {
         JSON.stringify(validated.notifyStatuses),
         JSON.stringify(validated.templates),
         validated.testNumber,
-        validated.syncContactsFromSheet ? 1 : 0,
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
         validated.defaultCountryCode,
@@ -462,7 +455,6 @@ export function createTenantRegistry({ db, logger }) {
         JSON.stringify(validated.notifyStatuses),
         JSON.stringify(validated.templates),
         validated.testNumber,
-        validated.syncContactsFromSheet ? 1 : 0,
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
         validated.defaultCountryCode,

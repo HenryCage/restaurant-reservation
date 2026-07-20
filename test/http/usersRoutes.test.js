@@ -33,7 +33,6 @@ function seedTenant(ctx, id = 'swift-logistics') {
     notifyStatuses: ['Out for delivery'],
     templates: { 'Out for delivery': 'Hi {name}' },
     testNumber: '',
-    syncContactsFromSheet: false,
   });
   if (!result.ok) throw new Error(`seedTenant failed: ${result.error}`);
   return result.tenant;

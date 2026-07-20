@@ -49,7 +49,6 @@ describe('TenantFormScreen', () => {
       senderId: 'SwiftLog',
       channel: 'dnd',
       testNumber: '',
-      syncContactsFromSheet: false,
       notifyStatuses: ['Out for delivery'],
       templates: { 'Out for delivery': 'Hi {name}' },
     };
@@ -183,7 +182,6 @@ describe('TenantFormScreen', () => {
         senderId: 'SwiftLog',
         channel: 'dnd',
         testNumber: '',
-        syncContactsFromSheet: false,
         notifyStatuses: ['Out for delivery'],
         templates: { 'Out for delivery': 'Hi {name}' },
         smsProvider: 'termii',
@@ -209,7 +207,6 @@ describe('TenantFormScreen', () => {
         senderId: 'SwiftLog',
         channel: 'dnd',
         testNumber: '',
-        syncContactsFromSheet: false,
         notifyStatuses: ['Out for delivery'],
         templates: { 'Out for delivery': 'Hi {name}' },
         smsProvider: 'termii',

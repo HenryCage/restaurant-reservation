@@ -41,19 +41,6 @@ describe('validateRegistry', () => {
     expect(out[0].templatesByCanonical['out for delivery']).toContain('out for delivery');
   });
 
-  it('defaults syncContactsFromSheet to false when absent, parses true when present', () => {
-    const log = fakeLogger();
-    const [withoutField] = validateRegistry({ tenants: [tenant()] }, log);
-    expect(withoutField.syncContactsFromSheet).toBe(false);
-
-    const [withField] = validateRegistry({ tenants: [tenant({ syncContactsFromSheet: true })] }, log);
-    expect(withField.syncContactsFromSheet).toBe(true);
-
-    // Any non-true value (wrong type, truthy-but-not-boolean) also defaults to false.
-    const [wrongType] = validateRegistry({ tenants: [tenant({ syncContactsFromSheet: 'true' })] }, log);
-    expect(wrongType.syncContactsFromSheet).toBe(false);
-  });
-
   it('skips inactive tenants', () => {
     const log = fakeLogger();
     const out = validateRegistry({ tenants: [tenant({ active: false })] }, log);
@@ -220,7 +207,6 @@ function insertRawRow(db, over = {}) {
     notify_statuses_json: JSON.stringify(['Out for delivery']),
     templates_json: JSON.stringify({ 'Out for delivery': 'Hi {name}' }),
     test_number: '',
-    sync_contacts_from_sheet: 0,
     sms_provider: '',
     sms_credentials_json: '{}',
     created_at: '2026-01-01T00:00:00.000Z',
@@ -228,8 +214,8 @@ function insertRawRow(db, over = {}) {
     ...over,
   };
   db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sync_contacts_from_sheet, sms_provider, sms_credentials_json, created_at, updated_at)
-     VALUES (@id, @name, @active, @sheet_id, @sheet_name, @sender_id, @channel, @notify_statuses_json, @templates_json, @test_number, @sync_contacts_from_sheet, @sms_provider, @sms_credentials_json, @created_at, @updated_at)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sms_provider, sms_credentials_json, created_at, updated_at)
+     VALUES (@id, @name, @active, @sheet_id, @sheet_name, @sender_id, @channel, @notify_statuses_json, @templates_json, @test_number, @sms_provider, @sms_credentials_json, @created_at, @updated_at)`,
   ).run(row);
 }
 
