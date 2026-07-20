@@ -5,8 +5,6 @@ import { loadConfig, describeConfig } from '../src/config.js';
 function baseEnv(overrides = {}) {
   return {
     NODE_ENV: 'development',
-    GOOGLE_SERVICE_ACCOUNT_EMAIL: 'svc@project.iam.gserviceaccount.com',
-    GOOGLE_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nABC\\n-----END PRIVATE KEY-----\\n',
     ...overrides,
   };
 }
@@ -30,12 +28,6 @@ describe('loadConfig — happy path', () => {
     expect(cfg.loginRateLimitWindowMinutes).toBe(15);
   });
 
-  it('un-escapes the \\n sequences in the private key', () => {
-    const cfg = loadConfig(baseEnv());
-    expect(cfg.google.privateKey).toContain('\n');
-    expect(cfg.google.privateKey).not.toContain('\\n');
-  });
-
   it('returns a frozen config object', () => {
     const cfg = loadConfig(baseEnv());
     expect(Object.isFrozen(cfg)).toBe(true);
@@ -43,13 +35,6 @@ describe('loadConfig — happy path', () => {
 });
 
 describe('loadConfig — validation', () => {
-  it('collects all missing-Google errors in one throw', () => {
-    const env = baseEnv();
-    delete env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
-    delete env.GOOGLE_PRIVATE_KEY;
-    expect(() => loadConfig(env)).toThrow(/GOOGLE_SERVICE_ACCOUNT_EMAIL[\s\S]*GOOGLE_PRIVATE_KEY/);
-  });
-
   it('rejects a non-integer numeric env var', () => {
     expect(() => loadConfig(baseEnv({ POLL_INTERVAL_SECONDS: 'soon' }))).toThrow(/POLL_INTERVAL_SECONDS/);
   });

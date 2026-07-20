@@ -64,6 +64,8 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
   const [channel, setChannel] = useState(tenant?.channel ?? 'dnd');
   const [testNumber, setTestNumber] = useState(tenant?.testNumber ?? '');
   const [defaultCountryCode, setDefaultCountryCode] = useState(tenant?.defaultCountryCode ?? '');
+  const [googleServiceAccountEmail, setGoogleServiceAccountEmail] = useState(tenant?.googleServiceAccountEmail ?? '');
+  const [googlePrivateKey, setGooglePrivateKey] = useState('');
   const [rows, setRows] = useState(initialRows(tenant));
   const [smsProvider, setSmsProvider] = useState(tenant?.smsProvider ?? '');
   const [credentials, setCredentials] = useState(() => initialCredentials(tenant?.smsProvider ?? '', tenant));
@@ -113,6 +115,8 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
       smsProvider,
       smsCredentials: smsProvider === '' ? {} : credentials,
       defaultCountryCode,
+      googleServiceAccountEmail,
+      googlePrivateKey,
     };
 
     try {
@@ -174,6 +178,39 @@ function TenantFormScreen({ api, mode, tenant, onSaved, onCancel }) {
             <div className="space-y-1.5">
               <label htmlFor="sheetName" className={labelClass}>Sheet Name</label>
               <input id="sheetName" type="text" value={sheetName} onChange={(e) => setSheetName(e.target.value)} className={inputClass} />
+            </div>
+          </div>
+
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <span className={labelClass}>Google Service Account</span>
+            <p className="text-xs text-slate-400">
+              This tenant's own Google Cloud service account, shared on their Sheet with Editor access -- not the
+              platform's. Leave both blank if this tenant has no Sheet configured yet.
+            </p>
+            <div className="space-y-1.5">
+              <label htmlFor="googleServiceAccountEmail" className={labelClass}>Service Account Email</label>
+              <input
+                id="googleServiceAccountEmail"
+                type="text"
+                value={googleServiceAccountEmail}
+                onChange={(e) => setGoogleServiceAccountEmail(e.target.value)}
+                className={`${inputClass} font-mono`}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="googlePrivateKey" className={labelClass}>Private Key</label>
+              <textarea
+                id="googlePrivateKey"
+                rows="3"
+                value={googlePrivateKey}
+                onChange={(e) => setGooglePrivateKey(e.target.value)}
+                className={`${inputClass} font-mono resize-none`}
+              />
+              {isEdit && tenant?.googlePrivateKey && (
+                <p className="text-xs text-slate-400">
+                  Currently set: <span className="font-mono">{tenant.googlePrivateKey}</span> — leave blank to keep unchanged.
+                </p>
+              )}
             </div>
           </div>
 

@@ -38,6 +38,8 @@ function rawTenant(over = {}) {
     testNumber: '',
     smsProvider: 'termii',
     smsCredentials: { apiKey: 'test-key', baseUrl: 'https://test.example' },
+    googleServiceAccountEmail: 'sa@example.iam.gserviceaccount.com',
+    googlePrivateKey: '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----\n',
     ...over,
   };
 }
@@ -93,6 +95,11 @@ function makeSmsSenderFactory(sendSms) {
   return { forTenant: () => sendSms };
 }
 
+/** Wraps a fake sheets client in the { forTenant(tenant) => client } shape createProcessor now expects. */
+function makeSheetsClientFactory(client) {
+  return { forTenant: () => client };
+}
+
 const FIXED_NOW = () => new Date('2026-06-30T12:00:00.000Z');
 
 // --- tests -----------------------------------------------------------------
@@ -108,7 +115,7 @@ describe('processor — multi-tenant isolation & routing', () => {
       sheetB: { rows: [orderRow({ orderId: '2', status: 'Delivered' })] },
     });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
 
@@ -131,7 +138,7 @@ describe('processor — multi-tenant isolation & routing', () => {
       sheetB: { rows: [orderRow({ orderId: '2' })] },
     });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     const out = await processor.run();
     expect(out.skipped).toBe(false);
@@ -147,7 +154,7 @@ describe('processor — idempotency', () => {
       sheetA: { rows: [orderRow({ status: 'Out for delivery ', lastNotifiedStatus: 'out for delivery' })] },
     });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sendSms.calls).toHaveLength(0);
@@ -158,7 +165,7 @@ describe('processor — idempotency', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sheets.writes).toHaveLength(1);
@@ -175,7 +182,7 @@ describe('processor — transient vs permanent failure', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms(() => ({ ok: false, permanent: false, error: 'network down' }));
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sheets.writes).toHaveLength(1);
@@ -188,7 +195,7 @@ describe('processor — transient vs permanent failure', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms(() => ({ ok: false, permanent: true, error: 'invalid sender id' }));
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sheets.writes[0].fields).toEqual({ lastNotifiedStatus: 'out for delivery', lastError: 'invalid sender id' });
@@ -208,7 +215,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -231,7 +238,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -251,7 +258,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -271,7 +278,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig({ dryRun: true }),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -291,7 +298,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -312,7 +319,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       onRow,
       now: FIXED_NOW,
@@ -332,7 +339,7 @@ describe('processor — onRow hook (sheet -> contacts sync)', () => {
       config: baseConfig(),
       logger: silentLogger(),
       registry: { load: () => tenants },
-      sheets: sheets.client,
+      sheetsClientFactory: makeSheetsClientFactory(sheets.client),
       smsSenderFactory: makeSmsSenderFactory(sendSms),
       now: FIXED_NOW,
     });
@@ -348,7 +355,7 @@ describe('processor — guardrails & robustness', () => {
     const rows = Array.from({ length: 5 }, (_, i) => orderRow({ rowNumber: i + 2, orderId: String(i + 1) }));
     const sheets = makeSheets({ sheetA: { rows } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig({ maxSendsPerTenantPerTick: 2 }), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig({ maxSendsPerTenantPerTick: 2 }), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     const out = await processor.run();
     expect(sendSms.calls).toHaveLength(2);
@@ -364,7 +371,7 @@ describe('processor — guardrails & robustness', () => {
       if (n === 2) throw new Error('boom on row 2');
       return { ok: true, providerMessageId: 'ok1' };
     });
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sendSms.calls).toHaveLength(2);
@@ -376,7 +383,7 @@ describe('processor — guardrails & robustness', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow({ phone: 'not-a-number' })] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     const out = await processor.run();
     expect(sendSms.calls).toHaveLength(0);
@@ -387,7 +394,7 @@ describe('processor — guardrails & robustness', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: () => ({ ok: false, error: 'missing required header(s): Status' }) });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sendSms.calls).toHaveLength(0);
@@ -397,7 +404,20 @@ describe('processor — guardrails & robustness', () => {
     const tenants = buildTenants([rawTenant({ smsProvider: '', smsCredentials: {} })]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+
+    const out = await processor.run();
+    expect(sendSms.calls).toHaveLength(0);
+    expect(sheets.reads).toHaveLength(0); // never even read the sheet
+    expect(sheets.writes).toHaveLength(0);
+    expect(out.summaries[0]).toMatchObject({ tenantId: 'a', scanned: 0 });
+  });
+
+  it('skips a tenant with no Google credentials configured -- no send, no sheet read, no row touched', async () => {
+    const tenants = buildTenants([rawTenant({ googleServiceAccountEmail: '', googlePrivateKey: '' })]);
+    const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
+    const sendSms = makeSendSms();
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     const out = await processor.run();
     expect(sendSms.calls).toHaveLength(0);
@@ -413,7 +433,7 @@ describe('processor — guardrails & robustness', () => {
     const tenants = buildTenants([rawTenant({ defaultCountryCode: '370' })]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow({ phone: '37060012345' })] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     const out = await processor.run();
     expect(out.summaries[0].invalidPhone).toBe(0);
@@ -427,7 +447,7 @@ describe('processor — DRY_RUN and test-number override', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig({ dryRun: true }), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig({ dryRun: true }), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sendSms.calls).toHaveLength(0);
@@ -439,7 +459,7 @@ describe('processor — DRY_RUN and test-number override', () => {
     const tenants = buildTenants([rawTenant()]);
     const sheets = makeSheets({ sheetA: { rows: [orderRow()] } });
     const sendSms = makeSendSms();
-    const processor = createProcessor({ config: baseConfig({ effectiveGlobalTestNumber: '+2348000000000' }), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig({ effectiveGlobalTestNumber: '+2348000000000' }), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(sendSms), now: FIXED_NOW });
 
     await processor.run();
     expect(sendSms.calls[0].to).toBe('+2348000000000');
@@ -463,7 +483,7 @@ describe('processor — single-flight', () => {
         async writeRow() {},
       },
     };
-    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheets: sheets.client, smsSenderFactory: makeSmsSenderFactory(makeSendSms()), now: FIXED_NOW });
+    const processor = createProcessor({ config: baseConfig(), logger: silentLogger(), registry: { load: () => tenants }, sheetsClientFactory: makeSheetsClientFactory(sheets.client), smsSenderFactory: makeSmsSenderFactory(makeSendSms()), now: FIXED_NOW });
 
     const first = processor.run(); // hangs at readOrders
     const second = await processor.run(); // should be skipped

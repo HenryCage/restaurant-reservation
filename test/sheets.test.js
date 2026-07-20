@@ -9,7 +9,7 @@ import {
   buildAppendData,
   buildOrderWriteData,
   parseAppendedRowNumber,
-  createSheetsClient,
+  createSheetsClientFactory,
 } from '../src/sheets.js';
 
 const FULL_HEADER = [
@@ -214,7 +214,12 @@ describe('parseAppendedRowNumber', () => {
   });
 });
 
-describe('createSheetsClient (with injected sheetsApi)', () => {
+describe('createSheetsClientFactory (with injected sheetsApi)', () => {
+  // A fake sheetsApi (deps.sheetsApi) short-circuits the real JWT/googleapis
+  // construction entirely, so the tenant's actual credential field values
+  // are never read in these tests -- any non-empty placeholder works.
+  const FAKE_TENANT = { googleServiceAccountEmail: 'sa@example.iam.gserviceaccount.com', googlePrivateKey: 'fake' };
+
   function fakeApi(values, { appendedRange = 'Orders!A2:E2' } = {}) {
     const calls = { get: [], batchUpdate: [], append: [] };
     const api = {
@@ -240,7 +245,7 @@ describe('createSheetsClient (with injected sheetsApi)', () => {
 
   it('readOrders fetches with FORMATTED_VALUE and parses', async () => {
     const { api, calls } = fakeApi([FULL_HEADER, ['1', 'Chidi', '08012345678', '15000', 'Out for delivery', '', '', '']]);
-    const client = createSheetsClient({}, { sheetsApi: api });
+    const client = createSheetsClientFactory({ sheetsApi: api }).forTenant(FAKE_TENANT);
     const out = await client.readOrders('sheet-1', 'Orders');
     expect(out.ok).toBe(true);
     expect(calls.get[0].valueRenderOption).toBe('FORMATTED_VALUE');
@@ -249,7 +254,7 @@ describe('createSheetsClient (with injected sheetsApi)', () => {
 
   it('writeRow issues a single batchUpdate of the service cells', async () => {
     const { api, calls } = fakeApi([FULL_HEADER]);
-    const client = createSheetsClient({}, { sheetsApi: api });
+    const client = createSheetsClientFactory({ sheetsApi: api }).forTenant(FAKE_TENANT);
     await client.writeRow('sheet-1', 'Orders', 2, { lastNotifiedStatus: 5, notifiedAt: 6, lastError: 7 }, {
       lastNotifiedStatus: 'delivered',
       notifiedAt: 'T',
@@ -262,7 +267,7 @@ describe('createSheetsClient (with injected sheetsApi)', () => {
 
   it('appendOrder issues a single values.append with the row placed by colIndex, and returns the actual inserted row number', async () => {
     const { api, calls } = fakeApi([FULL_HEADER], { appendedRange: 'Orders!A9:E9' });
-    const client = createSheetsClient({}, { sheetsApi: api });
+    const client = createSheetsClientFactory({ sheetsApi: api }).forTenant(FAKE_TENANT);
     const colIndex = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4 };
     const result = await client.appendOrder('sheet-1', 'Orders', colIndex, {
       orderId: 'ORD-20260720-AB12',
@@ -282,7 +287,7 @@ describe('createSheetsClient (with injected sheetsApi)', () => {
 
   it('writeOrderFields issues a single batchUpdate for the provided order fields', async () => {
     const { api, calls } = fakeApi([FULL_HEADER]);
-    const client = createSheetsClient({}, { sheetsApi: api });
+    const client = createSheetsClientFactory({ sheetsApi: api }).forTenant(FAKE_TENANT);
     const colIndex = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4 };
     await client.writeOrderFields('sheet-1', 'Orders', 3, colIndex, { status: 'Delivered' });
     expect(calls.batchUpdate).toHaveLength(1);
@@ -291,7 +296,7 @@ describe('createSheetsClient (with injected sheetsApi)', () => {
 
   it('writeOrderFields is a no-op when no field matches an existing column', async () => {
     const { api, calls } = fakeApi([FULL_HEADER]);
-    const client = createSheetsClient({}, { sheetsApi: api });
+    const client = createSheetsClientFactory({ sheetsApi: api }).forTenant(FAKE_TENANT);
     await client.writeOrderFields('sheet-1', 'Orders', 3, { orderId: 0 }, { amount: '9999' });
     expect(calls.batchUpdate).toHaveLength(0);
   });

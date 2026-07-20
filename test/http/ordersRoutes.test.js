@@ -45,8 +45,24 @@ async function loginAsNewUser(ctx, { tenantId = null, isSuperadmin = false } = {
 }
 
 const TENANTS = [
-  { id: 't1', sheetId: 'sheet-t1', sheetName: 'Orders', notifyStatuses: ['Out for delivery'], defaultCountryCode: '' },
-  { id: 't2', sheetId: 'sheet-t2', sheetName: 'Orders', notifyStatuses: [], defaultCountryCode: '' },
+  {
+    id: 't1',
+    sheetId: 'sheet-t1',
+    sheetName: 'Orders',
+    notifyStatuses: ['Out for delivery'],
+    defaultCountryCode: '',
+    googleServiceAccountEmail: 'sa@example.iam.gserviceaccount.com',
+    googlePrivateKey: 'fake-key',
+  },
+  {
+    id: 't2',
+    sheetId: 'sheet-t2',
+    sheetName: 'Orders',
+    notifyStatuses: [],
+    defaultCountryCode: '',
+    googleServiceAccountEmail: 'sa@example.iam.gserviceaccount.com',
+    googlePrivateKey: 'fake-key',
+  },
 ];
 
 describe('GET /api/orders', () => {
@@ -143,6 +159,20 @@ describe('GET /api/orders', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBe('invalid_grant: could not sign JWT');
+  });
+
+  it('a tenant with no Google credentials configured gets a clear 502, never even calling sheets.readOrders', async () => {
+    const unconfigured = [
+      { id: 't1', sheetId: 'sheet-t1', sheetName: 'Orders', notifyStatuses: [], defaultCountryCode: '', googleServiceAccountEmail: '', googlePrivateKey: '' },
+    ];
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+    ctx = await startTestServer({ registry: fakeRegistry(unconfigured), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
+    expect(res.status).toBe(502);
+    expect((await res.json()).error).toMatch(/Google Sheets is not configured/);
+    expect(sheets.calls.readOrders).toHaveLength(0);
   });
 });
 

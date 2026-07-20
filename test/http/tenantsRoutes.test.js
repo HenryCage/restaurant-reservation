@@ -225,5 +225,58 @@ describe('/api/tenants', () => {
         expect(stored.smsCredentials.apiKey).toBe('real-secret'); // untouched
       });
     });
+
+    describe('Google private key masking', () => {
+      const FAKE_KEY = '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----';
+
+      it('POST / and GET / never return the real key, only a fixed indicator -- the email is shown in full', async () => {
+        ctx = await startTestServer();
+        const { cookie } = await loginSuperadmin(ctx);
+
+        const createRes = await fetch(`${ctx.baseUrl}/api/tenants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify(
+            tenantPayload({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: FAKE_KEY }),
+          ),
+        });
+        expect(createRes.status).toBe(201);
+        const created = await createRes.json();
+        expect(created.googlePrivateKey).toBe('(private key set)');
+        expect(created.googleServiceAccountEmail).toBe('sa@example.com'); // not secret, passes through
+
+        const listRes = await fetch(`${ctx.baseUrl}/api/tenants`, { headers: { Cookie: cookie } });
+        const [listed] = await listRes.json();
+        expect(listed.googlePrivateKey).toBe('(private key set)');
+
+        // The real value is still what the sheet-reading path would actually use.
+        const [stored] = ctx.registry.listAll();
+        expect(stored.googlePrivateKey).toBe(FAKE_KEY);
+      });
+
+      it('PATCH response is also masked, and a blank key (with email unchanged) preserves the stored real value', async () => {
+        ctx = await startTestServer();
+        const { cookie } = await loginSuperadmin(ctx);
+        await fetch(`${ctx.baseUrl}/api/tenants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify(
+            tenantPayload({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: FAKE_KEY }),
+          ),
+        });
+
+        const patchRes = await fetch(`${ctx.baseUrl}/api/tenants/swift-logistics`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', Cookie: cookie },
+          body: JSON.stringify({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: '' }),
+        });
+        expect(patchRes.status).toBe(200);
+        const patched = await patchRes.json();
+        expect(patched.googlePrivateKey).toBe('(private key set)');
+
+        const [stored] = ctx.registry.listAll();
+        expect(stored.googlePrivateKey).toBe(FAKE_KEY); // untouched
+      });
+    });
   });
 });

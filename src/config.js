@@ -7,6 +7,9 @@
 //
 // SMS provider + credentials are per-tenant (Per-tenant SMS provider spec),
 // not global -- there is no SMS_PROVIDER/TERMII_*/AT_*/TWILIO_* here anymore.
+// Google Sheets credentials are per-tenant too (Per-tenant Google credentials
+// spec) -- there is no GOOGLE_SERVICE_ACCOUNT_EMAIL/GOOGLE_PRIVATE_KEY here
+// anymore either; each tenant brings its own service account.
 
 /**
  * @param {string|undefined} value
@@ -39,18 +42,6 @@ function parseIntEnv(env, name, fallback, errors, min = 1) {
 }
 
 /**
- * @param {Record<string,string|undefined>} env
- * @param {string} name
- * @param {string[]} errors
- * @returns {string}
- */
-function requireStr(env, name, errors) {
-  const v = (env[name] ?? '').trim();
-  if (v === '') errors.push(`${name} is required`);
-  return v;
-}
-
-/**
  * @typedef {ReturnType<typeof loadConfig>} Config
  */
 
@@ -64,16 +55,6 @@ export function loadConfig(env = process.env) {
   const errors = [];
 
   const nodeEnv = (env.NODE_ENV ?? 'production').trim() || 'production';
-
-  // Google (always required)
-  const serviceAccountEmail = requireStr(env, 'GOOGLE_SERVICE_ACCOUNT_EMAIL', errors);
-  let privateKey = (env.GOOGLE_PRIVATE_KEY ?? '').trim();
-  if (privateKey === '') {
-    errors.push('GOOGLE_PRIVATE_KEY is required');
-  } else {
-    // .env stores the key with literal \n sequences; turn them into real newlines.
-    privateKey = privateKey.replace(/\\n/g, '\n');
-  }
 
   const defaultCountryCode = (env.DEFAULT_COUNTRY_CODE ?? '234').replace(/\D/g, '') || '234';
 
@@ -108,7 +89,6 @@ export function loadConfig(env = process.env) {
   return Object.freeze({
     nodeEnv,
     isProduction,
-    google: Object.freeze({ serviceAccountEmail, privateKey }),
     defaultCountryCode,
     pollIntervalSeconds,
     sendDelayMs,

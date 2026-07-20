@@ -8,7 +8,7 @@ import 'dotenv/config';
 import { loadConfig, describeConfig } from './config.js';
 import { createLogger } from './logger.js';
 import { createTenantRegistry } from './tenants.js';
-import { createSheetsClient } from './sheets.js';
+import { createSheetsClientFactory } from './sheets.js';
 import { createSmsSenderFactory } from './sms/index.js';
 import { createProcessor } from './processor.js';
 import { createDb } from './db.js';
@@ -40,7 +40,7 @@ function main() {
     logger.warn('GLOBAL_TEST_NUMBER is set but IGNORED because NODE_ENV=production');
   }
 
-  const sheets = createSheetsClient(config);
+  const sheetsClientFactory = createSheetsClientFactory();
   const smsSenderFactory = createSmsSenderFactory({ config });
 
   // registry now depends on db (tenant config lives in SQLite, not a file --
@@ -64,11 +64,11 @@ function main() {
     }
   }
 
-  const processor = createProcessor({ config, logger, registry, sheets, smsSenderFactory, onRow });
+  const processor = createProcessor({ config, logger, registry, sheetsClientFactory, smsSenderFactory, onRow });
   const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, smsSenderFactory });
 
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
-  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheets });
+  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheetsClientFactory });
 
   // Fail loudly and exit so a supervisor can restart from a clean state.
   process.on('unhandledRejection', (reason) => {

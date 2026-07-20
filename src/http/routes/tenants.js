@@ -4,15 +4,20 @@
 // scoping involved, unlike every other /api/* route.
 
 import express from 'express';
-import { maskSmsCredentials } from '../../tenants.js';
+import { maskSmsCredentials, maskGooglePrivateKey } from '../../tenants.js';
 
 /**
- * Applied only at the HTTP response boundary (Per-tenant SMS provider spec)
- * -- the underlying stored value and the sending path never see this.
+ * Applied only at the HTTP response boundary (Per-tenant SMS provider /
+ * Per-tenant Google credentials specs) -- the underlying stored value and
+ * the sending/reading path never see this.
  * @param {any} tenant
  */
 function maskTenant(tenant) {
-  return { ...tenant, smsCredentials: maskSmsCredentials(tenant.smsProvider, tenant.smsCredentials) };
+  return {
+    ...tenant,
+    smsCredentials: maskSmsCredentials(tenant.smsProvider, tenant.smsCredentials),
+    googlePrivateKey: maskGooglePrivateKey(tenant.googlePrivateKey),
+  };
 }
 
 /**

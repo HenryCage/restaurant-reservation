@@ -42,6 +42,7 @@ export async function startTestServer(opts = {}) {
   // .load() (e.g. orders routes) can still pass a lighter opts.registry fake.
   const registry = opts.registry ?? createTenantRegistry({ db, logger: silentLogger() });
   const sheets = opts.sheets ?? { readOrders: async () => ({ ok: true, rows: [] }) };
+  const sheetsClientFactory = { forTenant: () => sheets };
   const app = createHttpServer({
     config,
     logger: silentLogger(),
@@ -49,7 +50,7 @@ export async function startTestServer(opts = {}) {
     contactsStore,
     campaignsStore,
     registry,
-    sheets,
+    sheetsClientFactory,
     ...(opts.clientDistPath ? { clientDistPath: opts.clientDistPath } : {}),
   });
 

@@ -120,6 +120,24 @@ function ensureTenantsDefaultCountryCodeColumn(db) {
 }
 
 /**
+ * Same self-healing pattern -- per-tenant Google Sheets credentials
+ * (Per-tenant Google credentials spec), replacing the single global
+ * GOOGLE_SERVICE_ACCOUNT_EMAIL/GOOGLE_PRIVATE_KEY that used to serve every
+ * tenant. Dedicated columns, not a JSON blob like sms_credentials_json --
+ * there's only one shape here, not one-of-several-providers.
+ * @param {import('better-sqlite3').Database} db
+ */
+function ensureTenantsGoogleColumns(db) {
+  const cols = db.prepare('PRAGMA table_info(tenants)').all().map((col) => col.name);
+  if (!cols.includes('google_service_account_email')) {
+    db.exec("ALTER TABLE tenants ADD COLUMN google_service_account_email TEXT NOT NULL DEFAULT ''");
+  }
+  if (!cols.includes('google_private_key')) {
+    db.exec("ALTER TABLE tenants ADD COLUMN google_private_key TEXT NOT NULL DEFAULT ''");
+  }
+}
+
+/**
  * Open (or create) the SQLite database and ensure the schema exists.
  * @param {string} path - filesystem path, or ':memory:' for tests.
  * @returns {import('better-sqlite3').Database}
@@ -132,5 +150,6 @@ export function createDb(path) {
   ensureUsersActiveColumn(db);
   ensureTenantsSmsColumns(db);
   ensureTenantsDefaultCountryCodeColumn(db);
+  ensureTenantsGoogleColumns(db);
   return db;
 }

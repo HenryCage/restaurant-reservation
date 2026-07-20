@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { createTenantRegistry, validateRegistry, canonicalStatus, maskSmsCredentials } from '../src/tenants.js';
+import { createTenantRegistry, validateRegistry, canonicalStatus, maskSmsCredentials, maskGooglePrivateKey } from '../src/tenants.js';
 import { createDb } from '../src/db.js';
 
 /** A no-op logger that records error messages for assertions. */
@@ -15,6 +15,10 @@ function fakeLogger() {
   };
   return l;
 }
+
+// No trailing "\n" -- validateTenant trims every string field (same convention
+// as senderId/testNumber), so a trailing newline would never round-trip.
+const FAKE_PEM_KEY = '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----';
 
 function tenant(overrides = {}) {
   return {
@@ -159,6 +163,49 @@ describe('validateRegistry', () => {
     const out = validateRegistry({ tenants: [tenant({ defaultCountryCode: '+370' })] }, log);
     expect(out[0].defaultCountryCode).toBe('370');
   });
+
+  it('allows an empty Google credential pair (not yet configured)', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant()] }, log);
+    expect(out).toHaveLength(1);
+    expect(out[0].googleServiceAccountEmail).toBe('');
+    expect(out[0].googlePrivateKey).toBe('');
+  });
+
+  it('accepts a fully-configured Google credential pair', () => {
+    const log = fakeLogger();
+    const out = validateRegistry(
+      { tenants: [tenant({ googleServiceAccountEmail: 'sa@example.iam.gserviceaccount.com', googlePrivateKey: FAKE_PEM_KEY })] },
+      log,
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].googleServiceAccountEmail).toBe('sa@example.iam.gserviceaccount.com');
+    expect(out[0].googlePrivateKey).toBe(FAKE_PEM_KEY);
+  });
+
+  it('rejects a half-configured Google credential (email without key)', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant({ googleServiceAccountEmail: 'sa@example.com' })] }, log);
+    expect(out).toHaveLength(0);
+    expect(log.errors.some((e) => /must both be set, or both left blank/.test(e.m))).toBe(true);
+  });
+
+  it('rejects a half-configured Google credential (key without email)', () => {
+    const log = fakeLogger();
+    const out = validateRegistry({ tenants: [tenant({ googlePrivateKey: FAKE_PEM_KEY })] }, log);
+    expect(out).toHaveLength(0);
+    expect(log.errors.some((e) => /must both be set, or both left blank/.test(e.m))).toBe(true);
+  });
+
+  it('rejects a Google private key that does not look like a PEM key', () => {
+    const log = fakeLogger();
+    const out = validateRegistry(
+      { tenants: [tenant({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: 'not-a-real-key' })] },
+      log,
+    );
+    expect(out).toHaveLength(0);
+    expect(log.errors.some((e) => /does not look like a PEM private key/.test(e.m))).toBe(true);
+  });
 });
 
 describe('maskSmsCredentials', () => {
@@ -183,6 +230,16 @@ describe('maskSmsCredentials', () => {
 
   it('passes through unchanged for an unconfigured (empty) provider', () => {
     expect(maskSmsCredentials('', {})).toEqual({});
+  });
+});
+
+describe('maskGooglePrivateKey', () => {
+  it('masks a non-empty key as a fixed indicator, never any real fragment', () => {
+    expect(maskGooglePrivateKey(FAKE_PEM_KEY)).toBe('(private key set)');
+  });
+
+  it('returns empty string for an unconfigured (empty) key', () => {
+    expect(maskGooglePrivateKey('')).toBe('');
   });
 });
 
@@ -383,6 +440,38 @@ describe('createTenantRegistry (SQLite) — update()', () => {
     });
     expect(res.ok).toBe(true);
     expect(res.tenant.smsCredentials).toEqual({ accountSid: 'AC1', authToken: 'tok1', fromNumber: '+15005550006' });
+  });
+
+  it('a blank googlePrivateKey in the patch preserves the previously stored key', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: FAKE_PEM_KEY }));
+
+    const res = registry.update('swift', {
+      googleServiceAccountEmail: 'sa@example.com', // unchanged, as the form always resends it
+      googlePrivateKey: '', // blank field left untouched -> keep existing
+    });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.googlePrivateKey).toBe(FAKE_PEM_KEY);
+  });
+
+  it('a non-blank googlePrivateKey in the patch overwrites the stored key', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: FAKE_PEM_KEY }));
+
+    const newKey = '-----BEGIN PRIVATE KEY-----\nNEW\n-----END PRIVATE KEY-----';
+    const res = registry.update('swift', { googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: newKey });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.googlePrivateKey).toBe(newKey);
+  });
+
+  it('clearing both Google fields together actually removes the configuration, not resurrects the old key', () => {
+    const { registry } = makeRegistry();
+    registry.create(tenant({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: FAKE_PEM_KEY }));
+
+    const res = registry.update('swift', { googleServiceAccountEmail: '', googlePrivateKey: '' });
+    expect(res.ok).toBe(true);
+    expect(res.tenant.googleServiceAccountEmail).toBe('');
+    expect(res.tenant.googlePrivateKey).toBe('');
   });
 });
 

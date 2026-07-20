@@ -30,15 +30,15 @@ function countryCodeFor(tenant, config) {
  * @param {{
  *   requireAuth: import('express').RequestHandler,
  *   registry: { load: () => import('../../tenants.js').Tenant[] },
- *   sheets: {
+ *   sheetsClientFactory: { forTenant: (tenant: import('../../tenants.js').Tenant) => {
  *     readOrders: (sheetId: string, sheetName: string) => Promise<any>,
  *     appendOrder: (sheetId: string, sheetName: string, colIndex: Record<string, number>, fields: object) => Promise<{ rowNumber: number|null }>,
  *     writeOrderFields: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string, number>, fields: object) => Promise<void>,
- *   },
+ *   } },
  *   config: import('../../config.js').Config,
  * }} deps
  */
-export function createOrdersRoutes({ requireAuth, registry, sheets, config }) {
+export function createOrdersRoutes({ requireAuth, registry, sheetsClientFactory, config }) {
   const router = express.Router();
 
   /** Resolve tenantId + tenant row, or send the appropriate error response. Returns null if already handled. */
@@ -56,8 +56,17 @@ export function createOrdersRoutes({ requireAuth, registry, sheets, config }) {
     return tenant;
   }
 
+  /** A tenant with no Google credentials configured gets a clear, distinct error rather than a confusing generic read failure (Per-tenant Google credentials spec -- mirrors "no SMS provider configured"). Returns null if already handled. */
+  function sheetsForTenant(tenant, res) {
+    if (tenant.googleServiceAccountEmail === '' || tenant.googlePrivateKey === '') {
+      res.status(502).json({ error: 'Google Sheets is not configured for this tenant' });
+      return null;
+    }
+    return sheetsClientFactory.forTenant(tenant);
+  }
+
   /** sheets.readOrders() can reject outright (bad credentials, network), not just resolve { ok: false } -- both surface as 502, never the generic 500 (spec §orders route, caught live via the dashboard-ui smoke test). Returns null if already handled. */
-  async function readOrRespondError(tenant, res) {
+  async function readOrRespondError(sheets, tenant, res) {
     let read;
     try {
       read = await sheets.readOrders(tenant.sheetId, tenant.sheetName);
@@ -75,7 +84,9 @@ export function createOrdersRoutes({ requireAuth, registry, sheets, config }) {
   router.get('/', requireAuth, async (req, res) => {
     const tenant = resolveTenant(req, res);
     if (!tenant) return;
-    const read = await readOrRespondError(tenant, res);
+    const sheets = sheetsForTenant(tenant, res);
+    if (!sheets) return;
+    const read = await readOrRespondError(sheets, tenant, res);
     if (!read) return;
     res.status(200).json({
       rows: read.rows,
@@ -87,7 +98,9 @@ export function createOrdersRoutes({ requireAuth, registry, sheets, config }) {
   router.post('/', requireAuth, async (req, res) => {
     const tenant = resolveTenant(req, res);
     if (!tenant) return;
-    const read = await readOrRespondError(tenant, res);
+    const sheets = sheetsForTenant(tenant, res);
+    if (!sheets) return;
+    const read = await readOrRespondError(sheets, tenant, res);
     if (!read) return;
 
     const body = req.body ?? {};
@@ -124,7 +137,9 @@ export function createOrdersRoutes({ requireAuth, registry, sheets, config }) {
   router.patch('/:rowNumber', requireAuth, async (req, res) => {
     const tenant = resolveTenant(req, res);
     if (!tenant) return;
-    const read = await readOrRespondError(tenant, res);
+    const sheets = sheetsForTenant(tenant, res);
+    if (!sheets) return;
+    const read = await readOrRespondError(sheets, tenant, res);
     if (!read) return;
 
     const rowNumber = Number(req.params.rowNumber);

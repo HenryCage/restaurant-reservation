@@ -272,22 +272,12 @@ export function parseAppendedRowNumber(updatedRange) {
 }
 
 /**
- * Create an authenticated Sheets client with readOrders/writeRow.
- * @param {import('./config.js').Config} config
- * @param {{ sheetsApi?: any }} [deps] - inject a fake sheetsApi for tests.
+ * Read/write methods for one authenticated sheetsApi instance. Shared by
+ * createSheetsClientFactory().forTenant() -- the per-tenant JWT auth differs,
+ * the methods themselves don't.
+ * @param {any} sheetsApi
  */
-export function createSheetsClient(config, deps = {}) {
-  const sheetsApi =
-    deps.sheetsApi ??
-    google.sheets({
-      version: 'v4',
-      auth: new google.auth.JWT({
-        email: config.google.serviceAccountEmail,
-        key: config.google.privateKey,
-        scopes: [SPREADSHEET_SCOPE],
-      }),
-    });
-
+function buildClient(sheetsApi) {
   return {
     /**
      * Read & parse a tenant's orders.
@@ -360,6 +350,40 @@ export function createSheetsClient(config, deps = {}) {
         spreadsheetId: sheetId,
         requestBody: { valueInputOption: 'RAW', data },
       });
+    },
+  };
+}
+
+/**
+ * Create a factory that builds a Sheets client scoped to one tenant's own
+ * Google service-account credentials (Per-tenant Google credentials spec --
+ * replaces the single global GOOGLE_SERVICE_ACCOUNT_EMAIL/GOOGLE_PRIVATE_KEY
+ * that used to serve every tenant). No fallback to any global config: a
+ * tenant with no credentials configured is the caller's responsibility to
+ * skip before ever calling .forTenant() (processor.js/orders.js do, mirroring
+ * the "no SMS provider configured" skip).
+ * @param {{ sheetsApi?: any }} [deps] - inject a fake sheetsApi for tests (used for every tenant).
+ */
+export function createSheetsClientFactory(deps = {}) {
+  return {
+    /**
+     * @param {{ googleServiceAccountEmail: string, googlePrivateKey: string }} tenant
+     */
+    forTenant(tenant) {
+      const sheetsApi =
+        deps.sheetsApi ??
+        google.sheets({
+          version: 'v4',
+          auth: new google.auth.JWT({
+            email: tenant.googleServiceAccountEmail,
+            // A tenant may paste their key with literal \n sequences (e.g.
+            // copied out of the downloaded JSON file's string value) just
+            // like .env used to require; un-escape them the same way.
+            key: tenant.googlePrivateKey.replace(/\\n/g, '\n'),
+            scopes: [SPREADSHEET_SCOPE],
+          }),
+        });
+      return buildClient(sheetsApi);
     },
   };
 }

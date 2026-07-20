@@ -51,8 +51,9 @@ separate tick and dependency set — nothing here touches the sheet engine.
 ## Requirements
 
 - Node.js **v20+** (uses native `fetch` and ESM).
-- A Google Cloud **service account** with the Google Sheets API enabled
-  (shared, used by every tenant's sheet).
+- Per tenant, a Google Cloud **service account** with the Sheets API enabled
+  (own project, own key — not shared across tenants) if that tenant tracks
+  orders in a Google Sheet.
 - Per tenant, an account with **Termii**, **Africa's Talking**, or **Twilio**
   and a registered sender ID — chosen and configured per-tenant via the
   dashboard, not globally.
@@ -61,13 +62,8 @@ separate tick and dependency set — nothing here touches the sheet engine.
 
 ```bash
 npm ci
-cp .env.example .env                       # fill in Google credentials, leave the rest at their defaults for a local demo
+cp .env.example .env                       # defaults are fine for a local demo; no Google/SMS credentials belong here
 ```
-
-**Google (once):** create a project, enable the Sheets API, create a service
-account, download its JSON key, and put the email + private key into `.env`
-(keep the downloaded JSON **outside** the repo). The `\n` sequences in
-`GOOGLE_PRIVATE_KEY` are un-escaped automatically at load.
 
 **Database:** nothing to do — `DB_PATH` (default `data/platform.db`) is
 created automatically on first run, schema included.
@@ -85,15 +81,19 @@ out-of-band; they'll be forced to change it on first login.
 
 **Per tenant:** log in as a superadmin and use the dashboard to add the
 tenant (sheet ID, sender ID, notify statuses/templates, SMS provider +
-credentials), then create that tenant's users. Practical notes:
+credentials, Google service account), then create that tenant's users.
+Practical notes:
 
 1. Register the client's sender ID and the transactional/DND route with
    their chosen SMS provider — this is approved by mobile operators and
    takes **~2–3 weeks**. Keep the tenant inactive until it's approved.
-2. Have the client share their Google Sheet with the service-account email
-   (Editor), not "anyone with the link". Format the **Phone** and **Amount**
-   columns as **Plain text** (a leading `'+` on a phone cell avoids Sheets
-   parsing it as a formula).
+2. Create a Google Cloud project + service account **for this tenant**
+   (Sheets API enabled), download its JSON key, and enter the email +
+   private key into the tenant's own form — no service account is shared
+   across tenants. Have the client share their Sheet with **that** service
+   account's email (Editor), not "anyone with the link". Format the
+   **Phone** and **Amount** columns as **Plain text** (a leading `'+` on a
+   phone cell avoids Sheets parsing it as a formula).
 
 ## Running
 
@@ -157,13 +157,12 @@ that drop when a referenced placeholder is empty (e.g. omit the amount line when
 ## Configuration reference
 
 Backend `.env` (see `.env.example` for the authoritative, commented list).
-SMS provider credentials are **not** here — each tenant's are entered via the
-dashboard and stored in SQLite.
+SMS provider credentials and Google Sheets credentials are **not** here —
+each tenant's own are entered via the dashboard and stored in SQLite.
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
 | `NODE_ENV` | `production` | `production` disables `GLOBAL_TEST_NUMBER`. |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_PRIVATE_KEY` | — | Shared service-account auth for Sheets access. |
 | `DEFAULT_COUNTRY_CODE` | `234` | Fallback for phone normalisation; a tenant's own `defaultCountryCode` overrides it. |
 | `POLL_INTERVAL_SECONDS` | `60` | Sheet-engine poll cadence. |
 | `SEND_DELAY_MS` | `400` | Delay between sends. |

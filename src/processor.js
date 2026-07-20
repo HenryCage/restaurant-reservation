@@ -25,10 +25,10 @@ import { maskPhone } from './logger.js';
  *   config: import('./config.js').Config,
  *   logger: import('./logger.js').Logger,
  *   registry: { load: () => import('./tenants.js').Tenant[] },
- *   sheets: {
+ *   sheetsClientFactory: { forTenant: (tenant: import('./tenants.js').Tenant) => {
  *     readOrders: (sheetId: string, sheetName: string) => Promise<any>,
  *     writeRow: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string,number>, fields: object) => Promise<void>,
- *   },
+ *   } },
  *   smsSenderFactory: { forTenant: (tenant: import('./tenants.js').Tenant) => (to: string, message: string, opts: { senderId: string, channel?: string }) => Promise<{ ok: boolean, providerMessageId?: string, error?: string, permanent?: boolean }> },
  *   onRow?: (tenant: import('./tenants.js').Tenant, contact: { name: string, phone: string }) => void,
  *   now?: () => Date,
@@ -36,7 +36,7 @@ import { maskPhone } from './logger.js';
  * }} deps
  */
 export function createProcessor(deps) {
-  const { config, logger, registry, sheets, smsSenderFactory, onRow } = deps;
+  const { config, logger, registry, sheetsClientFactory, smsSenderFactory, onRow } = deps;
   const now = deps.now ?? (() => new Date());
   const sleep = deps.sleep ?? ((ms) => (ms > 0 ? new Promise((r) => setTimeout(r, ms)) : Promise.resolve()));
 
@@ -90,7 +90,12 @@ export function createProcessor(deps) {
       log.warn('tenant has no SMS provider configured; skipping this tick');
       return summary;
     }
+    if (tenant.googleServiceAccountEmail === '' || tenant.googlePrivateKey === '') {
+      log.warn('tenant has no Google credentials configured; skipping this tick');
+      return summary;
+    }
     const sendSms = smsSenderFactory.forTenant(tenant);
+    const sheets = sheetsClientFactory.forTenant(tenant);
 
     const read = await sheets.readOrders(tenant.sheetId, tenant.sheetName);
     if (!read.ok) {
@@ -148,7 +153,7 @@ export function createProcessor(deps) {
 
     for (const { row, canonStatus, e164 } of toProcess) {
       try {
-        await processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms);
+        await processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms, sheets);
       } catch (err) {
         // Defensive: an unexpected throw on one row must not stop later rows.
         log.error('unexpected error processing row (isolated)', {
@@ -178,8 +183,9 @@ export function createProcessor(deps) {
    * @param {string} e164
    * @param {any} summary
    * @param {(to: string, message: string, opts: any) => Promise<any>} sendSms
+   * @param {{ writeRow: (sheetId: string, sheetName: string, rowNumber: number, colIndex: Record<string,number>, fields: object) => Promise<void> }} sheets
    */
-  async function processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms) {
+  async function processRow(tenant, log, colIndex, row, canonStatus, e164, summary, sendSms, sheets) {
     const template = tenant.templatesByCanonical[canonStatus];
     const message = buildMessage(template, { name: row.name, orderId: row.orderId, amount: row.amount });
     const recipient = resolveRecipient(tenant, e164);
@@ -198,7 +204,7 @@ export function createProcessor(deps) {
     }
 
     if (result.ok) {
-      await safeWrite(log, summary, tenant, row.rowNumber, colIndex, {
+      await safeWrite(log, summary, tenant, row.rowNumber, colIndex, sheets, {
         lastNotifiedStatus: canonStatus,
         notifiedAt: now().toISOString(),
         lastError: '',
@@ -216,7 +222,7 @@ export function createProcessor(deps) {
     if (result.permanent) {
       // Give up on this status so it does not retry forever / burn paid rejects.
       // Setting Last Notified Status makes the row inert until Status changes.
-      await safeWrite(log, summary, tenant, row.rowNumber, colIndex, {
+      await safeWrite(log, summary, tenant, row.rowNumber, colIndex, sheets, {
         lastNotifiedStatus: canonStatus,
         lastError: result.error ?? 'permanent failure',
       });
@@ -230,7 +236,7 @@ export function createProcessor(deps) {
     }
 
     // Transient: leave Last Notified Status unchanged so it retries next tick.
-    await safeWrite(log, summary, tenant, row.rowNumber, colIndex, {
+    await safeWrite(log, summary, tenant, row.rowNumber, colIndex, sheets, {
       lastError: result.error ?? 'transient failure',
     });
     summary.transientFail += 1;
@@ -244,7 +250,7 @@ export function createProcessor(deps) {
    * Write back service cells, isolating sheet-write failures (log + continue).
    * A write failure after a successful send means at-least-once for that one row.
    */
-  async function safeWrite(log, summary, tenant, rowNumber, colIndex, fields) {
+  async function safeWrite(log, summary, tenant, rowNumber, colIndex, sheets, fields) {
     try {
       await sheets.writeRow(tenant.sheetId, tenant.sheetName, rowNumber, colIndex, fields);
     } catch (err) {

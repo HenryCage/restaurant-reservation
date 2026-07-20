@@ -62,6 +62,8 @@ export function canonicalStatus(s) {
  * @property {string} smsProvider
  * @property {Record<string,string>} smsCredentials
  * @property {string} defaultCountryCode
+ * @property {string} googleServiceAccountEmail
+ * @property {string} googlePrivateKey
  */
 
 /**
@@ -163,6 +165,24 @@ export function validateTenant(raw, ctx, logger) {
   const defaultCountryCode =
     typeof raw.defaultCountryCode === 'string' ? raw.defaultCountryCode.replace(/\D/g, '') : '';
 
+  // Per-tenant Google credentials (no fallback to any global config -- an
+  // empty pair is a valid "not configured yet" state, same treatment as an
+  // unconfigured SMS provider: the sheet engine skips this tenant entirely
+  // rather than rejecting it here). The two fields are all-or-nothing: a
+  // half-configured credential can't do anything useful and would otherwise
+  // fail unpredictably at the first sheet read instead of at save time.
+  const googleServiceAccountEmail =
+    typeof raw.googleServiceAccountEmail === 'string' ? raw.googleServiceAccountEmail.trim() : '';
+  const googlePrivateKey = typeof raw.googlePrivateKey === 'string' ? raw.googlePrivateKey.trim() : '';
+  if (googleServiceAccountEmail !== '' || googlePrivateKey !== '') {
+    if (googleServiceAccountEmail === '' || googlePrivateKey === '') {
+      return skip('"googleServiceAccountEmail" and "googlePrivateKey" must both be set, or both left blank');
+    }
+    if (!googlePrivateKey.includes('BEGIN PRIVATE KEY') || !googlePrivateKey.includes('END PRIVATE KEY')) {
+      return skip('"googlePrivateKey" does not look like a PEM private key');
+    }
+  }
+
   return {
     id,
     name,
@@ -179,6 +199,8 @@ export function validateTenant(raw, ctx, logger) {
     smsProvider,
     smsCredentials,
     defaultCountryCode,
+    googleServiceAccountEmail,
+    googlePrivateKey,
   };
 }
 
@@ -200,6 +222,20 @@ export function maskSmsCredentials(provider, credentials) {
   const value = safeCredentials[secretField];
   const masked = value.length <= 4 ? '••••' : '••••' + value.slice(-4);
   return { ...safeCredentials, [secretField]: masked };
+}
+
+/**
+ * Mask a tenant's Google private key for an HTTP response: an all-or-nothing
+ * indicator, never any real fragment of the key. Unlike maskSmsCredentials'
+ * last-4-visible convention, a partial reveal is meaningless here -- every
+ * Google PEM private key ends with the identical "-----END PRIVATE KEY-----"
+ * marker, so a trailing-characters hint could never help anyone recognise
+ * *which* key is actually stored.
+ * @param {string} privateKey
+ * @returns {string}
+ */
+export function maskGooglePrivateKey(privateKey) {
+  return typeof privateKey === 'string' && privateKey !== '' ? '(private key set)' : '';
 }
 
 /**
@@ -285,6 +321,8 @@ function rowToRaw(row) {
     smsProvider: row.sms_provider,
     smsCredentials: JSON.parse(row.sms_credentials_json),
     defaultCountryCode: row.default_country_code,
+    googleServiceAccountEmail: row.google_service_account_email,
+    googlePrivateKey: row.google_private_key,
   };
 }
 
@@ -346,11 +384,11 @@ export function createTenantRegistry({ db, logger }) {
   const selectAllStmt = db.prepare('SELECT * FROM tenants');
   const selectOneStmt = db.prepare('SELECT * FROM tenants WHERE id = ?');
   const insertStmt = db.prepare(
-    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sms_provider, sms_credentials_json, default_country_code, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, sms_provider, sms_credentials_json, default_country_code, google_service_account_email, google_private_key, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const updateStmt = db.prepare(
-    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sms_provider = ?, sms_credentials_json = ?, default_country_code = ?, updated_at = ?
+    `UPDATE tenants SET name = ?, active = ?, sheet_id = ?, sheet_name = ?, sender_id = ?, channel = ?, notify_statuses_json = ?, templates_json = ?, test_number = ?, sms_provider = ?, sms_credentials_json = ?, default_country_code = ?, google_service_account_email = ?, google_private_key = ?, updated_at = ?
      WHERE id = ?`,
   );
 
@@ -412,6 +450,8 @@ export function createTenantRegistry({ db, logger }) {
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
         validated.defaultCountryCode,
+        validated.googleServiceAccountEmail,
+        validated.googlePrivateKey,
         now,
         now,
       );
@@ -438,6 +478,22 @@ export function createTenantRegistry({ db, logger }) {
       if (safePatch.smsCredentials && typeof safePatch.smsCredentials === 'object') {
         safePatch.smsCredentials = mergeSmsCredentials(existingRaw.smsCredentials, safePatch.smsCredentials);
       }
+      // googlePrivateKey follows the same "blank means keep existing" rule --
+      // the edit form's key field starts blank (it's never shown unmasked),
+      // so submitting it unchanged must not wipe the real stored key. But
+      // only when the email isn't *also* being cleared -- blanking both
+      // together is the explicit "remove Google configuration" action, which
+      // must actually clear the key rather than resurrect the old one and
+      // fail the all-or-nothing validation below.
+      const clearingGoogleEmail =
+        typeof safePatch.googleServiceAccountEmail === 'string' && safePatch.googleServiceAccountEmail.trim() === '';
+      if (
+        typeof safePatch.googlePrivateKey === 'string' &&
+        safePatch.googlePrivateKey.trim() === '' &&
+        !clearingGoogleEmail
+      ) {
+        safePatch.googlePrivateKey = existingRaw.googlePrivateKey;
+      }
       const merged = { ...existingRaw, ...safePatch, id };
 
       const ctx = buildDupContext(selectAllStmt.all(), merged, id);
@@ -458,6 +514,8 @@ export function createTenantRegistry({ db, logger }) {
         validated.smsProvider,
         JSON.stringify(validated.smsCredentials),
         validated.defaultCountryCode,
+        validated.googleServiceAccountEmail,
+        validated.googlePrivateKey,
         new Date().toISOString(),
         id,
       );

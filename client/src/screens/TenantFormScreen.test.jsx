@@ -239,4 +239,63 @@ describe('TenantFormScreen', () => {
       expect(screen.getByLabelText('Auth Token').value).toBe('');
     });
   });
+
+  describe('Google credential fields', () => {
+    it('create mode: submits googleServiceAccountEmail/googlePrivateKey from the visible fields', async () => {
+      const api = makeApi({ post: vi.fn().mockResolvedValue({ id: 'swift-logistics' }) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="create" tenant={null} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      fillCoreFields();
+      fireEvent.change(screen.getByLabelText('Service Account Email'), { target: { value: 'sa@example.com' } });
+      fireEvent.change(screen.getByLabelText('Private Key'), { target: { value: 'FAKE-KEY' } });
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.post).toHaveBeenCalledWith(
+        '/api/tenants',
+        expect.objectContaining({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: 'FAKE-KEY' }),
+      );
+    });
+
+    it('edit mode: the email prefills in full (not a secret); the private key starts blank with the masked indicator as helper text', () => {
+      const tenant = { id: 'swift-logistics', googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: '(private key set)' };
+      render(<TenantFormScreen api={makeApi()} mode="edit" tenant={tenant} onSaved={vi.fn()} onCancel={vi.fn()} />);
+
+      expect(screen.getByLabelText('Service Account Email').value).toBe('sa@example.com');
+      expect(screen.getByLabelText('Private Key').value).toBe('');
+      expect(screen.getByText(/Currently set:/)).toBeInTheDocument();
+      expect(screen.getByText('(private key set)')).toBeInTheDocument();
+    });
+
+    it('edit mode: leaving the private key blank submits an empty string (server interprets as keep-existing)', async () => {
+      const tenant = {
+        id: 'swift-logistics',
+        name: 'Swift Logistics',
+        sheetId: 'sheet-1',
+        senderId: 'SwiftLog',
+        notifyStatuses: ['Out for delivery'],
+        templates: { 'Out for delivery': 'Hi {name}' },
+        googleServiceAccountEmail: 'sa@example.com',
+        googlePrivateKey: '(private key set)',
+      };
+      const api = makeApi({ patch: vi.fn().mockResolvedValue(tenant) });
+      const onSaved = vi.fn();
+      render(<TenantFormScreen api={api} mode="edit" tenant={tenant} onSaved={onSaved} onCancel={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+      await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+      expect(api.patch).toHaveBeenCalledWith(
+        '/api/tenants/swift-logistics',
+        expect.objectContaining({ googleServiceAccountEmail: 'sa@example.com', googlePrivateKey: '' }),
+      );
+    });
+
+    it('no helper text when the tenant has no Google credentials configured yet', () => {
+      const tenant = { id: 'swift-logistics', googleServiceAccountEmail: '', googlePrivateKey: '' };
+      render(<TenantFormScreen api={makeApi()} mode="edit" tenant={tenant} onSaved={vi.fn()} onCancel={vi.fn()} />);
+      expect(screen.queryByText(/Currently set:/)).not.toBeInTheDocument();
+    });
+  });
 });

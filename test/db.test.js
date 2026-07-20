@@ -82,6 +82,8 @@ describe('createDb', () => {
       sms_provider: '',
       sms_credentials_json: '{}',
       default_country_code: '',
+      google_service_account_email: '',
+      google_private_key: '',
     });
   });
 
@@ -174,6 +176,55 @@ describe('createDb', () => {
       expect(db2.prepare('SELECT * FROM tenants WHERE id = ?').get('swift-logistics')).toMatchObject({
         sms_provider: 'termii',
         sms_credentials_json: '{"apiKey":"secret-key","baseUrl":"https://example.termii.com"}',
+      });
+      db2.close();
+    });
+  });
+
+  describe('tenants.google_service_account_email / google_private_key self-healing columns', () => {
+    let dir;
+
+    afterEach(() => {
+      if (dir) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      dir = undefined;
+    });
+
+    it('reopening the same file-backed database does not throw and preserves data', () => {
+      dir = mkdtempSync(join(tmpdir(), 'sms-dispatch-db-test-'));
+      const dbPath = join(dir, 'platform.db');
+
+      const db1 = createDb(dbPath);
+      db1.prepare(
+        `INSERT INTO tenants (id, name, active, sheet_id, sheet_name, sender_id, channel, notify_statuses_json, templates_json, test_number, google_service_account_email, google_private_key, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        'swift-logistics',
+        'Swift Logistics',
+        1,
+        'sheet-1',
+        'Orders',
+        'SwiftLog',
+        'dnd',
+        '["Out for delivery"]',
+        '{"Out for delivery":"Hi {name}"}',
+        '',
+        'sa@example.iam.gserviceaccount.com',
+        '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----',
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z',
+      );
+      db1.close();
+
+      // Second open on the same file: both columns already exist here, so
+      // this exercises the "already present -> skip the ALTER" branch for
+      // each -- an unconditional ALTER would throw "duplicate column name".
+      let db2;
+      expect(() => {
+        db2 = createDb(dbPath);
+      }).not.toThrow();
+      expect(db2.prepare('SELECT * FROM tenants WHERE id = ?').get('swift-logistics')).toMatchObject({
+        google_service_account_email: 'sa@example.iam.gserviceaccount.com',
+        google_private_key: '-----BEGIN PRIVATE KEY-----\nFAKE\n-----END PRIVATE KEY-----',
       });
       db2.close();
     });
