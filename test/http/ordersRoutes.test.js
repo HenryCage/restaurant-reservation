@@ -20,17 +20,34 @@ function fakeSheets(bySheetId) {
       const entry = bySheetId[sheetId];
       return typeof entry === 'function' ? entry() : (entry ?? { ok: true, rows: [] });
     },
-    async appendOrder(sheetId, sheetName, colIndex, fields) {
-      calls.appendOrder.push({ sheetId, sheetName, colIndex, fields });
+    async appendOrder(sheetId, sheetName, headerIndex, values) {
+      calls.appendOrder.push({ sheetId, sheetName, headerIndex, values });
       return { rowNumber: 99 };
     },
-    async writeOrderFields(sheetId, sheetName, rowNumber, colIndex, fields) {
-      calls.writeOrderFields.push({ sheetId, sheetName, rowNumber, colIndex, fields });
+    async writeOrderFields(sheetId, sheetName, rowNumber, headerIndex, values) {
+      calls.writeOrderFields.push({ sheetId, sheetName, rowNumber, headerIndex, values });
     },
   };
 }
 
-const COL_INDEX = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4 };
+// Matches what parseOrders actually returns: colIndex always has all 8 known
+// fields once a read succeeds (6 of them are required), headers is the raw,
+// position-aligned header row.
+const HEADERS = ['Order ID', 'Customer Name', 'Phone', 'Amount', 'Status', 'Last Notified Status', 'Notified At', 'Last Error'];
+const COL_INDEX = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4, lastNotifiedStatus: 5, notifiedAt: 6, lastError: 7 };
+const ROLES = {
+  orderId: 'Order ID',
+  phone: 'Phone',
+  status: 'Status',
+  lastNotifiedStatus: 'Last Notified Status',
+  notifiedAt: 'Notified At',
+  lastError: 'Last Error',
+};
+
+/** Builds a row fixture's `values` map from HEADERS, filling gaps with ''. */
+function rowValues(over = {}) {
+  return Object.fromEntries(HEADERS.map((h) => [h, over[h] ?? '']));
+}
 
 async function loginAsNewUser(ctx, { tenantId = null, isSuperadmin = false } = {}) {
   const email = `${isSuperadmin ? 'admin' : 'user'}-${Math.random().toString(36).slice(2)}@example.com`;
@@ -72,14 +89,15 @@ describe('GET /api/orders', () => {
     expect(res.status).toBe(401);
   });
 
-  it("a tenant user sees their own fake sheet's rows, columns, and notifyStatuses", async () => {
+  it("a tenant user sees their own fake sheet's headers, rows, roles, and notifyStatuses", async () => {
     const sheets = fakeSheets({
       'sheet-t1': {
         ok: true,
         colIndex: COL_INDEX,
-        rows: [{ orderId: 'O1', name: 'Ada', phone: '+2348012345678', status: 'Delivered' }],
+        headers: HEADERS,
+        rows: [{ rowNumber: 2, orderId: 'O1', values: rowValues({ 'Order ID': 'O1', 'Customer Name': 'Ada', Phone: '+2348012345678', Status: 'Delivered' }) }],
       },
-      'sheet-t2': { ok: true, colIndex: COL_INDEX, rows: [{ orderId: 'O2', name: 'Bola' }] },
+      'sheet-t2': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] },
     });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
@@ -87,24 +105,39 @@ describe('GET /api/orders', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
     expect(res.status).toBe(200);
     const body = await res.json();
+    expect(body.headers).toEqual(HEADERS);
     expect(body.rows).toHaveLength(1);
     expect(body.rows[0].orderId).toBe('O1');
-    expect(body.columns).toEqual(Object.keys(COL_INDEX));
+    expect(body.rows[0].values['Customer Name']).toBe('Ada');
+    expect(body.roles).toEqual(ROLES);
     expect(body.notifyStatuses).toEqual(['Out for delivery']);
     expect(sheets.calls.readOrders).toEqual([{ sheetId: 'sheet-t1', sheetName: 'Orders' }]);
   });
 
+  it('omits a blank header from the response headers list', async () => {
+    const headersWithBlank = [...HEADERS, ''];
+    const sheets = fakeSheets({
+      'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: headersWithBlank, rows: [] },
+    });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, { headers: { Cookie: cookie } });
+    const body = await res.json();
+    expect(body.headers).toEqual(HEADERS); // blank trailing header filtered out
+  });
+
   it("cannot see another tenant's rows by spoofing ?tenantId=", async () => {
     const sheets = fakeSheets({
-      'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [{ orderId: 'O1' }] },
-      'sheet-t2': { ok: true, colIndex: COL_INDEX, rows: [{ orderId: 'O2' }] },
+      'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [{ rowNumber: 2, orderId: 'O1', values: rowValues() }] },
+      'sheet-t2': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [{ rowNumber: 2, orderId: 'O2', values: rowValues() }] },
     });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
     const res = await fetch(`${ctx.baseUrl}/api/orders?tenantId=t2`, { headers: { Cookie: cookie } });
     const body = await res.json();
-    expect(body.rows).toEqual([{ orderId: 'O1' }]); // still t1, spoofed param ignored
+    expect(body.rows.map((r) => r.orderId)).toEqual(['O1']); // still t1, spoofed param ignored
   });
 
   describe('superadmin', () => {
@@ -116,13 +149,15 @@ describe('GET /api/orders', () => {
     });
 
     it("sees the requested tenant's rows with ?tenantId=", async () => {
-      const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [{ orderId: 'O1' }] } });
+      const sheets = fakeSheets({
+        'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [{ rowNumber: 2, orderId: 'O1', values: rowValues() }] },
+      });
       ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
       const { cookie } = await loginAsNewUser(ctx, { isSuperadmin: true });
 
       const res = await fetch(`${ctx.baseUrl}/api/orders?tenantId=t1`, { headers: { Cookie: cookie } });
       expect(res.status).toBe(200);
-      expect((await res.json()).rows).toEqual([{ orderId: 'O1' }]);
+      expect((await res.json()).rows.map((r) => r.orderId)).toEqual(['O1']);
     });
   });
 
@@ -165,7 +200,7 @@ describe('GET /api/orders', () => {
     const unconfigured = [
       { id: 't1', sheetId: 'sheet-t1', sheetName: 'Orders', notifyStatuses: [], defaultCountryCode: '', googleServiceAccountEmail: '', googlePrivateKey: '' },
     ];
-    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
     ctx = await startTestServer({ registry: fakeRegistry(unconfigured), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
@@ -178,37 +213,86 @@ describe('GET /api/orders', () => {
 
 describe('POST /api/orders', () => {
   it('creates an order: generates an id, normalises phone, leaves service columns blank', async () => {
-    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
     const res = await fetch(`${ctx.baseUrl}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ name: 'Ada', phone: '08012345678', amount: '15000', status: 'Processing' }),
+      body: JSON.stringify({ values: { 'Customer Name': 'Ada', Phone: '08012345678', Amount: '15000', Status: 'Processing' } }),
     });
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.orderId).toMatch(/^ORD-\d{8}-[A-Z0-9]{4}$/);
-    expect(body.phone).toBe('+2348012345678');
+    expect(body.values.Phone).toBe('+2348012345678');
     expect(body.rowNumber).toBe(99); // from the fake's appendOrder response
-    expect(body.lastNotifiedStatus).toBe('');
 
     expect(sheets.calls.appendOrder).toHaveLength(1);
     const call = sheets.calls.appendOrder[0];
     expect(call.sheetId).toBe('sheet-t1');
-    expect(call.fields).toMatchObject({ name: 'Ada', phone: '+2348012345678', amount: '15000', status: 'Processing' });
+    expect(call.values).toMatchObject({ 'Customer Name': 'Ada', Phone: '+2348012345678', Amount: '15000', Status: 'Processing' });
+    expect(call.values['Order ID']).toBe(body.orderId);
+    // Service columns are never set by this path.
+    expect(call.values['Last Notified Status']).toBeUndefined();
   });
 
-  it('rejects a blank status', async () => {
-    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+  it('an arbitrary column (not part of the known 8) round-trips through create', async () => {
+    const headersWithNotes = [...HEADERS, 'Notes'];
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: headersWithNotes, rows: [] } });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
     const res = await fetch(`${ctx.baseUrl}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ phone: '08012345678', status: '  ' }),
+      body: JSON.stringify({ values: { Phone: '08012345678', Status: 'Processing', Notes: 'fragile, handle with care' } }),
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).values.Notes).toBe('fragile, handle with care');
+    expect(sheets.calls.appendOrder[0].values.Notes).toBe('fragile, handle with care');
+    expect(sheets.calls.appendOrder[0].headerIndex.Notes).toBe(8); // buildHeaderIndex resolved its real position
+  });
+
+  it('rejects a values entry for a service-role header', async () => {
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ values: { Phone: '08012345678', Status: 'Processing', 'Last Notified Status': 'delivered' } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/cannot be set directly/);
+    expect(sheets.calls.appendOrder).toHaveLength(0);
+  });
+
+  it('rejects a values entry for the Order ID header', async () => {
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ values: { 'Order ID': 'SPOOFED', Phone: '08012345678', Status: 'Processing' } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/cannot be set directly/);
+    expect(sheets.calls.appendOrder).toHaveLength(0);
+  });
+
+  it('rejects a blank status', async () => {
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ values: { Phone: '08012345678', Status: '  ' } }),
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/status is required/);
@@ -216,14 +300,14 @@ describe('POST /api/orders', () => {
   });
 
   it('rejects an invalid phone', async () => {
-    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
     const res = await fetch(`${ctx.baseUrl}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ phone: 'not-a-phone', status: 'Processing' }),
+      body: JSON.stringify({ values: { Phone: 'not-a-phone', Status: 'Processing' } }),
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error).toMatch(/invalid phone/);
@@ -235,7 +319,7 @@ describe('POST /api/orders', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: '08012345678', status: 'Processing' }),
+      body: JSON.stringify({ values: { Phone: '08012345678', Status: 'Processing' } }),
     });
     expect(res.status).toBe(401);
   });
@@ -247,7 +331,8 @@ describe('PATCH /api/orders/:rowNumber', () => {
       'sheet-t1': {
         ok: true,
         colIndex: COL_INDEX,
-        rows: [{ rowNumber: 2, orderId: 'ORD-1', name: 'Ada', phone: '+2348012345678', status: 'Processing' }],
+        headers: HEADERS,
+        rows: [{ rowNumber: 2, orderId: 'ORD-1', values: rowValues({ 'Order ID': 'ORD-1', 'Customer Name': 'Ada', Phone: '+2348012345678', Status: 'Processing' }) }],
       },
     });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
@@ -256,26 +341,71 @@ describe('PATCH /api/orders/:rowNumber', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ expectedOrderId: 'ORD-1', status: 'Delivered' }),
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Status: 'Delivered' } }),
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.status).toBe('Delivered');
-    expect(body.name).toBe('Ada'); // untouched
+    expect(body.values.Status).toBe('Delivered');
+    expect(body.values['Customer Name']).toBe('Ada'); // untouched
 
     expect(sheets.calls.writeOrderFields).toHaveLength(1);
-    expect(sheets.calls.writeOrderFields[0].fields).toEqual({ status: 'Delivered' });
+    expect(sheets.calls.writeOrderFields[0].values).toEqual({ Status: 'Delivered' });
   });
 
-  it('404s for a row number that no longer exists', async () => {
-    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, rows: [] } });
+  it('an arbitrary column edits through the same generic path', async () => {
+    const headersWithNotes = [...HEADERS, 'Notes'];
+    const sheets = fakeSheets({
+      'sheet-t1': {
+        ok: true,
+        colIndex: COL_INDEX,
+        headers: headersWithNotes,
+        rows: [{ rowNumber: 2, orderId: 'ORD-1', values: { ...rowValues({ 'Order ID': 'ORD-1' }), Notes: 'old note' } }],
+      },
+    });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
     const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
 
     const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ expectedOrderId: 'ORD-1', status: 'Delivered' }),
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Notes: 'new note' } }),
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).values.Notes).toBe('new note');
+    expect(sheets.calls.writeOrderFields[0].values).toEqual({ Notes: 'new note' });
+  });
+
+  it('rejects a values entry for a service-role header', async () => {
+    const sheets = fakeSheets({
+      'sheet-t1': {
+        ok: true,
+        colIndex: COL_INDEX,
+        headers: HEADERS,
+        rows: [{ rowNumber: 2, orderId: 'ORD-1', values: rowValues({ 'Order ID': 'ORD-1' }) }],
+      },
+    });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { 'Notified At': '2026-01-01' } }),
+    });
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/cannot be set directly/);
+    expect(sheets.calls.writeOrderFields).toHaveLength(0);
+  });
+
+  it('404s for a row number that no longer exists', async () => {
+    const sheets = fakeSheets({ 'sheet-t1': { ok: true, colIndex: COL_INDEX, headers: HEADERS, rows: [] } });
+    ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
+    const { cookie } = await loginAsNewUser(ctx, { tenantId: 't1' });
+
+    const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Cookie: cookie },
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Status: 'Delivered' } }),
     });
     expect(res.status).toBe(404);
     expect(sheets.calls.writeOrderFields).toHaveLength(0);
@@ -286,7 +416,8 @@ describe('PATCH /api/orders/:rowNumber', () => {
       'sheet-t1': {
         ok: true,
         colIndex: COL_INDEX,
-        rows: [{ rowNumber: 2, orderId: 'ORD-2-SOMEONE-ELSE', name: 'Bola', phone: '+2348012345678', status: 'Processing' }],
+        headers: HEADERS,
+        rows: [{ rowNumber: 2, orderId: 'ORD-2-SOMEONE-ELSE', values: rowValues({ 'Order ID': 'ORD-2-SOMEONE-ELSE' }) }],
       },
     });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
@@ -295,7 +426,7 @@ describe('PATCH /api/orders/:rowNumber', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ expectedOrderId: 'ORD-1', status: 'Delivered' }),
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Status: 'Delivered' } }),
     });
     expect(res.status).toBe(409);
     expect((await res.json()).error).toMatch(/this order changed/);
@@ -307,7 +438,8 @@ describe('PATCH /api/orders/:rowNumber', () => {
       'sheet-t1': {
         ok: true,
         colIndex: COL_INDEX,
-        rows: [{ rowNumber: 2, orderId: 'ORD-1', name: 'Ada', phone: '+2348012345678', status: 'Processing' }],
+        headers: HEADERS,
+        rows: [{ rowNumber: 2, orderId: 'ORD-1', values: rowValues({ 'Order ID': 'ORD-1' }) }],
       },
     });
     ctx = await startTestServer({ registry: fakeRegistry(TENANTS), sheets });
@@ -316,7 +448,7 @@ describe('PATCH /api/orders/:rowNumber', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Cookie: cookie },
-      body: JSON.stringify({ expectedOrderId: 'ORD-1', phone: 'nope' }),
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Phone: 'nope' } }),
     });
     expect(res.status).toBe(400);
     expect(sheets.calls.writeOrderFields).toHaveLength(0);
@@ -327,7 +459,7 @@ describe('PATCH /api/orders/:rowNumber', () => {
     const res = await fetch(`${ctx.baseUrl}/api/orders/2`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ expectedOrderId: 'ORD-1', status: 'Delivered' }),
+      body: JSON.stringify({ expectedOrderId: 'ORD-1', values: { Status: 'Delivered' } }),
     });
     expect(res.status).toBe(401);
   });

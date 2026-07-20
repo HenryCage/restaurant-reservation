@@ -7,31 +7,50 @@ import { COUNTRY_CODES } from '../countryCodes.js';
 // dashboard tab (spec: 30-60s range).
 const POLL_INTERVAL_MS = 45000;
 
-const EMPTY_FORM = { name: '', phone: '', countryCode: '234', amount: '', status: '' };
+const inputClass =
+  'w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 placeholder:text-slate-400 disabled:bg-slate-50 disabled:text-slate-400';
+const selectClass =
+  'border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800';
 
 /**
  * @param {{ api: ReturnType<typeof import('../api.js').createApiClient> }} props
  */
 function OrdersTable({ api }) {
   const [orders, setOrders] = useState(null); // null = not loaded yet
-  const [columns, setColumns] = useState([]);
+  const [headers, setHeaders] = useState([]);
+  const [roles, setRoles] = useState({});
   const [notifyStatuses, setNotifyStatuses] = useState([]);
   const [error, setError] = useState(null);
   const [formStatus, setFormStatus] = useState(null);
 
   const [creating, setCreating] = useState(false);
-  const [createForm, setCreateForm] = useState(EMPTY_FORM);
+  const [createValues, setCreateValues] = useState({});
+  const [createCountryCode, setCreateCountryCode] = useState('234');
 
   const [editingRowNumber, setEditingRowNumber] = useState(null);
-  const [editForm, setEditForm] = useState(EMPTY_FORM);
   const [editOrderId, setEditOrderId] = useState('');
+  const [editValues, setEditValues] = useState({});
+  const [editCountryCode, setEditCountryCode] = useState('234');
 
   const fetchOrders = useCallback(async () => {
     try {
       const data = await api.get('/api/orders');
+      // A stale backend (not yet restarted after a deploy) or a proxy/cache
+      // hiccup could hand back an older response shape -- fail into the
+      // existing error banner rather than crash the whole component.
+      if (
+        !data ||
+        !Array.isArray(data.rows) ||
+        !Array.isArray(data.headers) ||
+        typeof data.roles !== 'object' ||
+        data.rows.some((r) => !r || typeof r.values !== 'object')
+      ) {
+        throw new Error('Unexpected response from the server -- try refreshing the page.');
+      }
       setOrders(data.rows);
-      setColumns(data.columns);
-      setNotifyStatuses(data.notifyStatuses);
+      setHeaders(data.headers);
+      setRoles(data.roles);
+      setNotifyStatuses(data.notifyStatuses ?? []);
       setError(null);
     } catch (err) {
       setError(err.message);
@@ -44,12 +63,12 @@ function OrdersTable({ api }) {
     return () => clearInterval(interval);
   }, [fetchOrders]);
 
-  const showName = columns.includes('name');
-  const showAmount = columns.includes('amount');
+  const serviceHeaders = [roles.lastNotifiedStatus, roles.notifiedAt, roles.lastError];
 
   function startCreate() {
     setCreating(true);
-    setCreateForm(EMPTY_FORM);
+    setCreateValues({});
+    setCreateCountryCode('234');
     setFormStatus(null);
   }
 
@@ -61,7 +80,7 @@ function OrdersTable({ api }) {
     e.preventDefault();
     setFormStatus(null);
     try {
-      await api.post('/api/orders', createForm);
+      await api.post('/api/orders', { values: createValues, countryCode: createCountryCode });
       setCreating(false);
       setFormStatus({ type: 'success', message: 'Order created.' });
       fetchOrders();
@@ -73,13 +92,13 @@ function OrdersTable({ api }) {
   function startEdit(order) {
     setEditingRowNumber(order.rowNumber);
     setEditOrderId(order.orderId);
-    setEditForm({
-      name: order.name ?? '',
-      phone: order.phone ?? '',
-      countryCode: '234',
-      amount: order.amount ?? '',
-      status: order.status ?? '',
-    });
+    // Every header's value pre-fills except Order ID/service columns, which
+    // are rendered straight from the row itself (read-only, never submitted).
+    const values = { ...order.values };
+    delete values[roles.orderId];
+    for (const h of serviceHeaders) delete values[h];
+    setEditValues(values);
+    setEditCountryCode('234');
     setFormStatus(null);
   }
 
@@ -91,7 +110,11 @@ function OrdersTable({ api }) {
     e.preventDefault();
     setFormStatus(null);
     try {
-      await api.patch(`/api/orders/${rowNumber}`, { expectedOrderId: editOrderId, ...editForm });
+      await api.patch(`/api/orders/${rowNumber}`, {
+        expectedOrderId: editOrderId,
+        values: editValues,
+        countryCode: editCountryCode,
+      });
       setEditingRowNumber(null);
       fetchOrders();
     } catch (err) {
@@ -103,6 +126,72 @@ function OrdersTable({ api }) {
         setFormStatus({ type: 'error', message: err.message });
       }
     }
+  }
+
+  /** One input per header, in sheet order -- shared shape for both the New Order form and an in-row edit form. */
+  function renderField(header, { values, setValues, countryCode, setCountryCode, labelFor, countryLabel, disabledValue }) {
+    if (disabledValue !== undefined) {
+      return (
+        <input
+          key={header}
+          type="text"
+          aria-label={labelFor(header)}
+          value={disabledValue}
+          disabled
+          className={`${inputClass} font-mono`}
+        />
+      );
+    }
+    if (header === roles.phone) {
+      return (
+        <div key={header} className="flex gap-2">
+          <select
+            aria-label={countryLabel}
+            value={countryCode}
+            onChange={(e) => setCountryCode(e.target.value)}
+            className={selectClass}
+          >
+            {COUNTRY_CODES.map((c) => (
+              <option key={c.code} value={c.code}>{c.label}</option>
+            ))}
+          </select>
+          <input
+            type="tel"
+            aria-label={labelFor(header)}
+            value={values[header] ?? ''}
+            onChange={(e) => setValues((v) => ({ ...v, [header]: e.target.value }))}
+            required
+            className={`${inputClass} flex-1 min-w-0 font-mono`}
+          />
+        </div>
+      );
+    }
+    if (header === roles.status) {
+      return (
+        <input
+          key={header}
+          type="text"
+          list="orderStatuses"
+          placeholder={header}
+          aria-label={labelFor(header)}
+          value={values[header] ?? ''}
+          onChange={(e) => setValues((v) => ({ ...v, [header]: e.target.value }))}
+          required
+          className={inputClass}
+        />
+      );
+    }
+    return (
+      <input
+        key={header}
+        type="text"
+        placeholder={header}
+        aria-label={labelFor(header)}
+        value={values[header] ?? ''}
+        onChange={(e) => setValues((v) => ({ ...v, [header]: e.target.value }))}
+        className={inputClass}
+      />
+    );
   }
 
   return (
@@ -145,57 +234,19 @@ function OrdersTable({ api }) {
 
       {creating && (
         <form onSubmit={handleCreateSubmit} className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2.5">
-          {showName && (
-            <input
-              type="text"
-              placeholder="Name"
-              aria-label="New order name"
-              value={createForm.name}
-              onChange={(e) => setCreateForm((f) => ({ ...f, name: e.target.value }))}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 placeholder:text-slate-400"
-            />
-          )}
-          <div className="flex gap-2">
-            <select
-              aria-label="New order country"
-              value={createForm.countryCode}
-              onChange={(e) => setCreateForm((f) => ({ ...f, countryCode: e.target.value }))}
-              className="border border-slate-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-            >
-              {COUNTRY_CODES.map((c) => (
-                <option key={c.code} value={c.code}>{c.label}</option>
-              ))}
-            </select>
-            <input
-              type="tel"
-              placeholder="Phone"
-              aria-label="New order phone"
-              value={createForm.phone}
-              onChange={(e) => setCreateForm((f) => ({ ...f, phone: e.target.value }))}
-              required
-              className="flex-1 min-w-0 border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-            />
-          </div>
-          {showAmount && (
-            <input
-              type="text"
-              placeholder="Amount"
-              aria-label="New order amount"
-              value={createForm.amount}
-              onChange={(e) => setCreateForm((f) => ({ ...f, amount: e.target.value }))}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 placeholder:text-slate-400"
-            />
-          )}
-          <input
-            type="text"
-            list="orderStatuses"
-            placeholder="Status"
-            aria-label="New order status"
-            value={createForm.status}
-            onChange={(e) => setCreateForm((f) => ({ ...f, status: e.target.value }))}
-            required
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800 placeholder:text-slate-400"
-          />
+          {headers
+            .filter((h) => h !== roles.orderId) // server-generated, omitted from create entirely
+            .map((header) =>
+              renderField(header, {
+                values: createValues,
+                setValues: setCreateValues,
+                countryCode: createCountryCode,
+                setCountryCode: setCreateCountryCode,
+                labelFor: (h) => `New order ${h}`,
+                countryLabel: 'New order country',
+                disabledValue: serviceHeaders.includes(header) ? '' : undefined,
+              }),
+            )}
           <div className="flex gap-2">
             <button type="submit" className="flex-1 py-2 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800">
               Create
@@ -223,12 +274,9 @@ function OrdersTable({ api }) {
           <table className="w-full text-left text-sm border-collapse">
             <thead>
               <tr className="border-b border-slate-100 text-slate-400 font-bold">
-                <th className="py-2.5">Order ID</th>
-                <th className="py-2.5">Name</th>
-                <th className="py-2.5">Phone</th>
-                <th className="py-2.5">Status</th>
-                <th className="py-2.5">Last Notified Status</th>
-                <th className="py-2.5">Last Error</th>
+                {headers.map((header) => (
+                  <th key={header} className="py-2.5 pr-4 whitespace-nowrap">{header}</th>
+                ))}
                 <th className="py-2.5"></th>
               </tr>
             </thead>
@@ -236,57 +284,27 @@ function OrdersTable({ api }) {
               {orders.map((o) =>
                 editingRowNumber === o.rowNumber ? (
                   <tr key={o.rowNumber} className="bg-slate-50/50">
-                    <td colSpan={7} className="py-3">
+                    <td colSpan={headers.length + 1} className="py-3">
                       <form
                         onSubmit={(e) => handleEditSubmit(e, o.rowNumber)}
                         className="flex flex-wrap items-center gap-2"
                       >
-                        <span className="font-mono text-xs text-slate-400 px-2">{editOrderId}</span>
-                        {showName && (
-                          <input
-                            type="text"
-                            aria-label={`Edit name for order ${o.orderId}`}
-                            value={editForm.name}
-                            onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
-                            className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-                          />
+                        {headers.map((header) =>
+                          renderField(header, {
+                            values: editValues,
+                            setValues: setEditValues,
+                            countryCode: editCountryCode,
+                            setCountryCode: setEditCountryCode,
+                            labelFor: (h) => `Edit ${h} for order ${o.orderId}`,
+                            countryLabel: `Edit country for order ${o.orderId}`,
+                            disabledValue:
+                              header === roles.orderId
+                                ? editOrderId
+                                : serviceHeaders.includes(header)
+                                  ? o.values[header] ?? ''
+                                  : undefined,
+                          }),
                         )}
-                        <select
-                          aria-label={`Edit country for order ${o.orderId}`}
-                          value={editForm.countryCode}
-                          onChange={(e) => setEditForm((f) => ({ ...f, countryCode: e.target.value }))}
-                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-                        >
-                          {COUNTRY_CODES.map((c) => (
-                            <option key={c.code} value={c.code}>{c.label}</option>
-                          ))}
-                        </select>
-                        <input
-                          type="tel"
-                          aria-label={`Edit phone for order ${o.orderId}`}
-                          value={editForm.phone}
-                          onChange={(e) => setEditForm((f) => ({ ...f, phone: e.target.value }))}
-                          required
-                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-                        />
-                        {showAmount && (
-                          <input
-                            type="text"
-                            aria-label={`Edit amount for order ${o.orderId}`}
-                            value={editForm.amount}
-                            onChange={(e) => setEditForm((f) => ({ ...f, amount: e.target.value }))}
-                            className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-                          />
-                        )}
-                        <input
-                          type="text"
-                          list="orderStatuses"
-                          aria-label={`Edit status for order ${o.orderId}`}
-                          value={editForm.status}
-                          onChange={(e) => setEditForm((f) => ({ ...f, status: e.target.value }))}
-                          required
-                          className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10 focus:border-slate-800"
-                        />
                         <button type="submit" className="py-1.5 px-3 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-slate-800">
                           Save
                         </button>
@@ -302,12 +320,11 @@ function OrdersTable({ api }) {
                   </tr>
                 ) : (
                   <tr key={o.rowNumber} className="hover:bg-slate-50/50">
-                    <td className="py-3 font-semibold text-slate-900">{o.orderId}</td>
-                    <td className="py-3">{o.name}</td>
-                    <td className="py-3 text-slate-500 font-mono">{o.phone}</td>
-                    <td className="py-3">{o.status}</td>
-                    <td className="py-3 text-slate-500">{o.lastNotifiedStatus || '—'}</td>
-                    <td className="py-3 text-rose-600">{o.lastError || '—'}</td>
+                    {headers.map((header) => (
+                      <td key={header} className="py-3 pr-4 whitespace-nowrap">
+                        {o.values[header] || (header === roles.lastNotifiedStatus || header === roles.lastError ? '—' : '')}
+                      </td>
+                    ))}
                     <td className="py-3">
                       <button
                         type="button"

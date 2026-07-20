@@ -1,7 +1,19 @@
 # Implementation plan: Orders column parity with the Sheet
 
 Spec: `docs/superpowers/specs/2026-07-20-orders-column-parity-design.md`
-Status: not started.
+Status: implemented (all 5 steps). Steps 1-4: 385 backend tests, 154 client
+tests, `npm run build` all green -- also caught and fixed two other client
+tests (`DashboardScreen.test.jsx`, `App.test.jsx`) with stale `/api/orders`
+mock shapes that were silently passing (the "Orders" heading renders
+regardless of success/error, masking the mismatch), same class of gap as
+the predecessor spec found. Step 5: live smoke check against the real
+Swift Logistics sheet confirmed real value -- its actual header order is
+`Customer Name, Amount, Order ID, Phone, Status, ...` (Order ID third, not
+first), exactly the kind of per-tenant column order the old hardcoded UI
+got wrong and this feature fixes. Did not add a scratch column to the real
+sheet (a header-row change is more invasive than the scratch rows used
+elsewhere) -- arbitrary-column behavior is covered by automated tests
+instead.
 
 (Note: the `writing-plans` skill isn't installed in this environment --
 written directly, same as the other plans in this directory.)

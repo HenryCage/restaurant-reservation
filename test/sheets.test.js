@@ -8,6 +8,8 @@ import {
   generateOrderId,
   buildAppendData,
   buildOrderWriteData,
+  buildRoles,
+  buildHeaderIndex,
   parseAppendedRowNumber,
   createSheetsClientFactory,
 } from '../src/sheets.js';
@@ -64,9 +66,20 @@ describe('buildColumnIndex', () => {
     if (!out.ok) expect(out.error).toMatch(/duplicate header/);
   });
 
-  it('ignores unrelated duplicate columns', () => {
+  it('rejects a duplicate arbitrary (unrelated) column too, not just known fields', () => {
+    // Orders column-parity spec: an ambiguous column can't be written back
+    // to reliably whether or not the system recognises what it's for.
     const out = buildColumnIndex([...FULL_HEADER, 'Notes', 'Notes']);
-    expect(out.ok).toBe(true);
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.error).toMatch(/duplicate header/);
+      expect(out.error).toContain('Notes');
+    }
+  });
+
+  it('duplicate detection is case/space-insensitive for arbitrary columns too', () => {
+    const out = buildColumnIndex([...FULL_HEADER, 'Notes', ' notes ']);
+    expect(out.ok).toBe(false);
   });
 });
 
@@ -89,6 +102,24 @@ describe('parseOrders — header-driven mapping survives reordering/insertion', 
       expect(r.amount).toBe('15000');
       expect(r.lastNotifiedStatus).toBe('');
       expect(r.lastError).toBe('timeout');
+
+      // Orders column-parity spec: headers preserves the sheet's own order
+      // (including "Notes", a column the system doesn't otherwise recognise),
+      // and the row's `values` map exposes every column by its raw header text.
+      expect(out.headers).toEqual([
+        'Notes', 'Phone', 'Order ID', 'Status', 'Customer Name', 'Amount', 'Last Error', 'Notified At', 'Last Notified Status',
+      ]);
+      expect(r.values).toEqual({
+        Notes: 'ignore me',
+        Phone: '08012345678',
+        'Order ID': '1234',
+        Status: 'Out for delivery',
+        'Customer Name': 'Chidi',
+        Amount: '15000',
+        'Last Error': 'timeout',
+        'Notified At': '',
+        'Last Notified Status': '',
+      });
     }
   });
 
@@ -110,6 +141,20 @@ describe('parseOrders — header-driven mapping survives reordering/insertion', 
 
   it('fails on an empty sheet', () => {
     expect(parseOrders([]).ok).toBe(false);
+  });
+
+  it('a blank header keeps its position in headers (for colIndex alignment) but is unreachable via values', () => {
+    const values = [
+      [...FULL_HEADER, ''], // trailing blank-header column, e.g. a spacer
+      ['1', 'Chidi', '08012345678', '15000', 'Out for delivery', '', '', '', 'spacer data'],
+    ];
+    const out = parseOrders(values);
+    expect(out.ok).toBe(true);
+    if (out.ok) {
+      expect(out.headers[8]).toBe(''); // position preserved, aligned with colIndex
+      expect(Object.values(out.rows[0].values)).not.toContain('spacer data');
+      expect(Object.keys(out.rows[0].values)).not.toContain('');
+    }
   });
 });
 
@@ -196,6 +241,54 @@ describe('buildOrderWriteData', () => {
     const colIndex = { orderId: 0, phone: 1, status: 2 }; // no "amount" column
     const data = buildOrderWriteData('Orders', 3, colIndex, { amount: '9999', status: 'Cancelled' });
     expect(data).toEqual([{ range: 'Orders!C3', values: [['Cancelled']] }]);
+  });
+});
+
+describe('buildRoles', () => {
+  it('resolves all 6 role fields to their actual header text', () => {
+    const headers = ['Order ID', 'Customer Name', 'Phone', 'Amount', 'Status', 'Last Notified Status', 'Notified At', 'Last Error'];
+    const colIndex = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4, lastNotifiedStatus: 5, notifiedAt: 6, lastError: 7 };
+    expect(buildRoles(headers, colIndex)).toEqual({
+      orderId: 'Order ID',
+      phone: 'Phone',
+      status: 'Status',
+      lastNotifiedStatus: 'Last Notified Status',
+      notifiedAt: 'Notified At',
+      lastError: 'Last Error',
+    });
+  });
+
+  it('excludes name/amount -- they are ordinary headers now, not roles', () => {
+    const headers = ['Order ID', 'Customer Name', 'Phone', 'Amount', 'Status', 'Last Notified Status', 'Notified At', 'Last Error'];
+    const colIndex = { orderId: 0, name: 1, phone: 2, amount: 3, status: 4, lastNotifiedStatus: 5, notifiedAt: 6, lastError: 7 };
+    const roles = buildRoles(headers, colIndex);
+    expect(roles.name).toBeUndefined();
+    expect(roles.amount).toBeUndefined();
+  });
+
+  it('resolves correctly even when a blank header sits before a role column (index alignment)', () => {
+    const headers = ['', 'Order ID', 'Phone', 'Status', 'Last Notified Status', 'Notified At', 'Last Error'];
+    const colIndex = { orderId: 1, phone: 2, status: 3, lastNotifiedStatus: 4, notifiedAt: 5, lastError: 6 };
+    expect(buildRoles(headers, colIndex).orderId).toBe('Order ID');
+  });
+});
+
+describe('buildHeaderIndex', () => {
+  it('maps every non-blank header to its position', () => {
+    const headers = ['Order ID', 'Notes', 'Phone'];
+    expect(buildHeaderIndex(headers)).toEqual({ 'Order ID': 0, Notes: 1, Phone: 2 });
+  });
+
+  it('skips blank headers', () => {
+    const headers = ['Order ID', '', 'Phone'];
+    const index = buildHeaderIndex(headers);
+    expect(index).toEqual({ 'Order ID': 0, Phone: 2 });
+    expect(Object.keys(index)).not.toContain('');
+  });
+
+  it('a header containing regex-special characters is a plain object key, not a pattern', () => {
+    const headers = ['Order ID', 'Notes (urgent?)', 'Phone'];
+    expect(buildHeaderIndex(headers)['Notes (urgent?)']).toBe(1);
   });
 });
 

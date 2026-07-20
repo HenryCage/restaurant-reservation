@@ -16,7 +16,9 @@ function makeApi({
         return contacts;
       }
       if (path === '/api/campaigns') return campaigns;
-      if (path === '/api/orders') return { rows: orders, columns: ['orderId', 'name', 'phone', 'amount', 'status'], notifyStatuses: [] };
+      if (path === '/api/orders') {
+        return { rows: orders, headers: ['Order ID', 'Customer Name', 'Phone', 'Amount', 'Status'], roles: { orderId: 'Order ID', phone: 'Phone', status: 'Status' }, notifyStatuses: [] };
+      }
       if (path === '/api/status') return sendStatus;
       throw new Error(`unexpected path: ${path}`);
     }),
@@ -29,7 +31,11 @@ describe('DashboardScreen', () => {
     const api = makeApi({
       contacts: [{ id: 'c1', name: 'Ada', phone: '+2348012345678', tags: [] }],
       campaigns: [{ id: 'camp1', name: 'Promo', sendTo: 'all', scheduledTime: '2026-01-01T00:00:00.000Z', status: 'sent' }],
-      orders: [{ rowNumber: 2, orderId: 'O1', name: 'Ada', phone: '+2348012345678', status: 'Delivered', lastNotifiedStatus: 'delivered', lastError: '' }],
+      orders: [{
+        rowNumber: 2,
+        orderId: 'O1',
+        values: { 'Order ID': 'O1', 'Customer Name': 'Ada', Phone: '+2348012345678', Amount: '', Status: 'Delivered' },
+      }],
     });
     render(<DashboardScreen api={api} onLogout={vi.fn()} />);
 

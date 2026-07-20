@@ -2,10 +2,13 @@
 //
 // Column mapping is by HEADER NAME (case-insensitive, trimmed), never by fixed
 // position, because clients own and edit their sheets. The pure functions
-// (parseOrders, buildColumnIndex, columnIndexToLetter) carry the mapping logic
-// and are unit-tested without any network. The I/O wrapper (createSheetsClient)
-// reads with FORMATTED_VALUE so Phone/Amount arrive as typed strings, and writes
-// back only the three service-owned cells per row (never row-level writes).
+// (parseOrders, buildColumnIndex, buildRoles, buildHeaderIndex, columnIndexToLetter)
+// carry the mapping logic and are unit-tested without any network. The I/O
+// wrapper (createSheetsClientFactory().forTenant()) reads with FORMATTED_VALUE
+// so Phone/Amount arrive as typed strings, and writes back only the three
+// service-owned cells per row via writeRow (never row-level writes) -- the
+// HTTP-triggered order-edit path (appendOrder/writeOrderFields) is separate
+// and can touch any other column.
 
 import { google } from 'googleapis';
 import { randomInt } from 'node:crypto';
@@ -66,28 +69,38 @@ export function quoteSheetName(name) {
 
 /**
  * Resolve each logical field to its column index from the header row.
+ * Also rejects **any** duplicate non-blank header, not just a duplicate
+ * among the known logical fields -- an ambiguous column (two headers with
+ * the same text, e.g. two "Notes" columns) can't be read or written back to
+ * reliably, whether or not the system recognises what it's for (Orders
+ * column-parity spec).
  * @param {string[]} headerRow
  * @returns {{ ok: true, colIndex: Record<string, number> } | { ok: false, error: string }}
  */
 export function buildColumnIndex(headerRow) {
   const header = headerRow.map(canonicalHeader);
+
+  const seenAt = new Map();
+  const duplicateCanon = new Set();
+  header.forEach((canon, i) => {
+    if (canon === '') return;
+    if (seenAt.has(canon)) duplicateCanon.add(canon);
+    else seenAt.set(canon, i);
+  });
+  if (duplicateCanon.size > 0) {
+    const rawNames = [...duplicateCanon].map((canon) => String(headerRow[seenAt.get(canon)] ?? '').trim());
+    return { ok: false, error: `duplicate header(s): ${rawNames.join(', ')}` };
+  }
+
   /** @type {Record<string, number>} */
   const colIndex = {};
   const missing = [];
-  const duplicates = [];
-
   for (const [field, def] of Object.entries(ORDER_COLUMNS)) {
-    const want = canonicalHeader(def.header);
-    const matches = [];
-    header.forEach((h, i) => {
-      if (h === want) matches.push(i);
-    });
-    if (matches.length > 1) duplicates.push(def.header);
-    else if (matches.length === 1) colIndex[field] = matches[0];
+    const idx = header.indexOf(canonicalHeader(def.header));
+    if (idx !== -1) colIndex[field] = idx;
     else if (def.required) missing.push(def.header);
   }
 
-  if (duplicates.length) return { ok: false, error: `duplicate header(s): ${duplicates.join(', ')}` };
   if (missing.length) return { ok: false, error: `missing required header(s): ${missing.join(', ')}` };
   return { ok: true, colIndex };
 }
@@ -102,14 +115,22 @@ export function buildColumnIndex(headerRow) {
  * @property {string} status
  * @property {string} lastNotifiedStatus
  * @property {string} lastError
+ * @property {Record<string, string>} values - every non-blank-headed column's
+ *   value, keyed by that column's raw header text (Orders column-parity spec).
  */
 
 /**
  * Parse a raw 2D values array (incl. header row) into order rows (pure).
  * Reads everything as strings, pads ragged rows, and skips rows missing any of
  * Order ID / Phone / Status.
+ *
+ * `headers` is position-aligned with `colIndex`'s indices (a blank header
+ * cell keeps its slot as `''`, it is not spliced out) -- `colIndex` values
+ * are real physical column positions used to compute real A1 cell
+ * references elsewhere, so this array can never be compacted. Filtering out
+ * blank entries for display is the caller's job (Orders column-parity spec).
  * @param {any[][]} values
- * @returns {{ ok: true, colIndex: Record<string, number>, rows: OrderRow[] } | { ok: false, error: string }}
+ * @returns {{ ok: true, colIndex: Record<string, number>, headers: string[], rows: OrderRow[] } | { ok: false, error: string }}
  */
 export function parseOrders(values) {
   if (!Array.isArray(values) || values.length === 0) {
@@ -120,6 +141,7 @@ export function parseOrders(values) {
   const indexed = buildColumnIndex(headerRow);
   if (!indexed.ok) return indexed;
   const { colIndex } = indexed;
+  const headers = headerRow.map((h) => String(h ?? '').trim());
 
   /** @param {any[]} raw @param {string} field */
   const cell = (raw, field) => {
@@ -139,6 +161,14 @@ export function parseOrders(values) {
     // Skip rows that are blank in any required field (also skips trailing empties).
     if (orderId === '' || phone.trim() === '' || status.trim() === '') continue;
 
+    /** @type {Record<string, string>} */
+    const rowValues = {};
+    headers.forEach((header, idx) => {
+      if (header === '') return; // no meaningful key to store this column's data under
+      const v = raw[idx];
+      rowValues[header] = v === undefined || v === null ? '' : String(v);
+    });
+
     rows.push({
       rowNumber: i + 1,
       orderId,
@@ -148,10 +178,11 @@ export function parseOrders(values) {
       status,
       lastNotifiedStatus: cell(raw, 'lastNotifiedStatus'),
       lastError: cell(raw, 'lastError'),
+      values: rowValues,
     });
   }
 
-  return { ok: true, colIndex, rows };
+  return { ok: true, colIndex, headers, rows };
 }
 
 /**
@@ -254,6 +285,41 @@ export function buildOrderWriteData(sheetName, rowNumber, colIndex, fields) {
     data.push({ range, values: [[value ?? '']] });
   }
   return data;
+}
+
+/** The logical fields given special UI/validation treatment (Orders column-parity spec). name/amount are deliberately excluded -- they're just ordinary headers now, like any other optional column. */
+const ROLE_FIELDS = ['orderId', 'phone', 'status', 'lastNotifiedStatus', 'notifiedAt', 'lastError'];
+
+/**
+ * Map each "role" field to that tenant's actual header text, so the HTTP/UI
+ * layer knows which real column needs phone-normalisation, which needs the
+ * status suggestions, and which 3 are engine-owned/read-only -- everything
+ * else is a plain column (Orders column-parity spec). All 6 role fields are
+ * `required: true` in ORDER_COLUMNS, so `colIndex[field]` is always defined
+ * here whenever `parseOrders`/`buildColumnIndex` returned `ok: true` at all.
+ * @param {string[]} headers - position-aligned with colIndex, as returned by parseOrders.
+ * @param {Record<string, number>} colIndex
+ * @returns {Record<string, string>}
+ */
+export function buildRoles(headers, colIndex) {
+  return Object.fromEntries(ROLE_FIELDS.map((field) => [field, headers[colIndex[field]]]));
+}
+
+/**
+ * Map every non-blank header to its column position -- the generic
+ * counterpart to `colIndex` (which only knows the 6+2 logical fields) used
+ * by the HTTP-triggered create/edit path to write *any* column, known or
+ * not (Orders column-parity spec). A blank header has no meaningful key and
+ * is skipped, consistent with it being absent from the values a row exposes.
+ * @param {string[]} headers - position-aligned with colIndex, as returned by parseOrders.
+ * @returns {Record<string, number>}
+ */
+export function buildHeaderIndex(headers) {
+  const index = {};
+  headers.forEach((header, i) => {
+    if (header !== '') index[header] = i;
+  });
+  return index;
 }
 
 /**
