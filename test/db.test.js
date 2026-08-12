@@ -5,13 +5,13 @@ import { join } from 'node:path';
 import { createDb } from '../src/db.js';
 
 describe('createDb', () => {
-  it('creates all six tables on an in-memory database', () => {
+  it('creates the app tables on an in-memory database', () => {
     const db = createDb(':memory:');
     const tables = db
       .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
       .all()
       .map((r) => r.name);
-    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts', 'sessions', 'tenants', 'users']);
+    expect(tables).toEqual(['campaign_recipients', 'campaigns', 'contacts', 'reservations', 'sessions', 'tenants', 'users']);
   });
 
   it('round-trips a row through each table', () => {
@@ -32,6 +32,27 @@ describe('createDb', () => {
     ).run('r1', 'camp1', 'c1', '+2348012345678', 'pending');
     expect(db.prepare('SELECT * FROM campaign_recipients WHERE id = ?').get('r1')).toMatchObject({
       status: 'pending',
+    });
+
+    db.prepare(
+      `INSERT INTO reservations
+         (id, tenant_id, contact_id, name, phone, party_size, reservation_time, notes, sms_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      'res1',
+      't1',
+      'c1',
+      'Ada',
+      '+2348012345678',
+      4,
+      '2026-01-01T19:00:00.000Z',
+      '',
+      'pending',
+      '2026-01-01T00:00:00.000Z',
+    );
+    expect(db.prepare('SELECT * FROM reservations WHERE id = ?').get('res1')).toMatchObject({
+      party_size: 4,
+      sms_status: 'pending',
     });
   });
 

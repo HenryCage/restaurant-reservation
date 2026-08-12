@@ -12,6 +12,7 @@ import { createAuthRoutes } from './routes/auth.js';
 import { createContactsRoutes } from './routes/contacts.js';
 import { createCampaignsRoutes } from './routes/campaigns.js';
 import { createOrdersRoutes } from './routes/orders.js';
+import { createReservationsRoutes } from './routes/reservations.js';
 import { createStatusRoutes } from './routes/status.js';
 import { createTenantsRoutes } from './routes/tenants.js';
 import { createUsersRoutes } from './routes/users.js';
@@ -29,7 +30,9 @@ const CLIENT_DIST_PATH = fileURLToPath(new URL('../../client/dist', import.meta.
  *   authStore: ReturnType<typeof import('../auth.js').createAuthStore>,
  *   contactsStore: ReturnType<typeof import('../contacts.js').createContactsStore>,
  *   campaignsStore: ReturnType<typeof import('../campaigns.js').createCampaignsStore>,
+ *   reservationsStore: ReturnType<typeof import('../reservations.js').createReservationsStore>,
  *   registry: ReturnType<typeof import('../tenants.js').createTenantRegistry>,
+ *   smsSenderFactory: ReturnType<typeof import('../sms/index.js').createSmsSenderFactory>,
  *   sheetsClientFactory: { forTenant: (tenant: import('../tenants.js').Tenant) => { readOrders: (sheetId: string, sheetName: string) => Promise<any> } },
  *   clientDistPath?: string,
  * }} deps
@@ -40,7 +43,15 @@ export function createHttpServer({
   authStore,
   contactsStore,
   campaignsStore,
+  reservationsStore,
   registry,
+  smsSenderFactory = {
+    forTenant: (tenant) => async () => ({
+      ok: false,
+      error: `tenant "${tenant.id}" has no SMS sender configured`,
+      permanent: false,
+    }),
+  },
   sheetsClientFactory,
   clientDistPath = CLIENT_DIST_PATH,
 }) {
@@ -59,6 +70,7 @@ export function createHttpServer({
 
   // No exemptPaths: every /api/* route stays blocked by must_change_password.
   const apiRequireAuth = createRequireAuth({ authStore });
+  app.use('/api/reservations', createReservationsRoutes({ config, contactsStore, reservationsStore, registry, smsSenderFactory }));
   app.use('/api/contacts', createContactsRoutes({ requireAuth: apiRequireAuth, contactsStore }));
   app.use('/api/campaigns', createCampaignsRoutes({ requireAuth: apiRequireAuth, campaignsStore }));
   app.use('/api/orders', createOrdersRoutes({ requireAuth: apiRequireAuth, registry, sheetsClientFactory, config }));

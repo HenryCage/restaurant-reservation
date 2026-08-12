@@ -5,6 +5,7 @@ import { createDb } from '../../../src/db.js';
 import { createAuthStore } from '../../../src/auth.js';
 import { createContactsStore } from '../../../src/contacts.js';
 import { createCampaignsStore } from '../../../src/campaigns.js';
+import { createReservationsStore } from '../../../src/reservations.js';
 import { createTenantRegistry } from '../../../src/tenants.js';
 import { createHttpServer } from '../../../src/http/server.js';
 
@@ -36,6 +37,7 @@ export async function startTestServer(opts = {}) {
   const authStore = createAuthStore(db, opts.now ? { now: opts.now } : {});
   const contactsStore = createContactsStore(db, opts.now ? { now: opts.now } : {});
   const campaignsStore = createCampaignsStore(db, opts.now ? { now: opts.now } : {});
+  const reservationsStore = createReservationsStore(db, opts.now ? { now: opts.now } : {});
   const config = baseTestConfig(opts.configOverrides);
   // Real SQLite-backed registry by default (same db as everything else) so
   // tenant CRUD tests exercise the actual store; tests that only care about
@@ -43,13 +45,20 @@ export async function startTestServer(opts = {}) {
   const registry = opts.registry ?? createTenantRegistry({ db, logger: silentLogger() });
   const sheets = opts.sheets ?? { readOrders: async () => ({ ok: true, rows: [] }) };
   const sheetsClientFactory = { forTenant: () => sheets };
+  const smsSenderFactory =
+    opts.smsSenderFactory ??
+    {
+      forTenant: () => async () => ({ ok: true, providerMessageId: 'test-message-id' }),
+    };
   const app = createHttpServer({
     config,
     logger: silentLogger(),
     authStore,
     contactsStore,
     campaignsStore,
+    reservationsStore,
     registry,
+    smsSenderFactory,
     sheetsClientFactory,
     ...(opts.clientDistPath ? { clientDistPath: opts.clientDistPath } : {}),
   });
@@ -64,6 +73,7 @@ export async function startTestServer(opts = {}) {
     authStore,
     contactsStore,
     campaignsStore,
+    reservationsStore,
     registry,
     baseUrl: `http://127.0.0.1:${port}`,
     close: () => new Promise((resolve) => server.close(resolve)),

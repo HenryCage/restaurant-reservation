@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import App from './App.jsx';
 
 function jsonResponse(status, body) {
@@ -10,49 +10,58 @@ beforeEach(() => {
   global.fetch = vi.fn();
 });
 
-describe('App — auth state machine driven by GET /auth/me', () => {
-  it('renders LoginScreen when /auth/me returns 401', async () => {
-    global.fetch.mockResolvedValue(jsonResponse(401, { error: 'not authenticated' }));
+describe('App reservation form', () => {
+  it('renders the public reservation form first', () => {
     render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Reserve a table' })).toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Reservation form' })).toBeInTheDocument();
   });
 
-  it('renders ChangePasswordScreen when mustChangePassword is true', async () => {
-    global.fetch.mockResolvedValue(jsonResponse(200, { mustChangePassword: true, tenantId: 't1', isSuperadmin: false }));
-    render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Set a new password' })).toBeInTheDocument();
-  });
+  it('posts reservation details and shows the SMS success message', async () => {
+    global.fetch.mockResolvedValue(
+      jsonResponse(201, {
+        reservation: { name: 'Ada' },
+        sms: { status: 'sent', error: null },
+      }),
+    );
 
-  it('renders the tenant list (superadmin home) for a superadmin with no tenant chosen yet', async () => {
-    global.fetch.mockImplementation(async (url) => {
-      if (url === '/auth/me') return jsonResponse(200, { mustChangePassword: false, tenantId: null, isSuperadmin: true });
-      return jsonResponse(200, []); // TenantListScreen's own /api/tenants fetch
+    render(<App />);
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: '08012345678' } });
+    fireEvent.change(screen.getByLabelText('Party size'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-08-20T19:30' } });
+    fireEvent.change(screen.getByLabelText('Notes'), { target: { value: 'Window seat' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Book reservation' }));
+
+    await screen.findByText(/Reservation received for Ada/);
+    expect(global.fetch).toHaveBeenCalledWith(
+      '/api/reservations',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+      }),
+    );
+
+    const [, options] = global.fetch.mock.calls[0];
+    expect(JSON.parse(options.body)).toMatchObject({
+      name: 'Ada',
+      phone: '08012345678',
+      countryCode: '234',
+      partySize: 4,
+      reservationTime: '2026-08-20T19:30',
+      notes: 'Window seat',
     });
-    render(<App />);
-    expect(await screen.findByRole('heading', { name: 'Tenants' })).toBeInTheDocument();
   });
 
-  it('renders DashboardScreen for a normal, non-gated tenant user', async () => {
-    global.fetch.mockImplementation(async (url) => {
-      if (url === '/auth/me') return jsonResponse(200, { mustChangePassword: false, tenantId: 't1', isSuperadmin: false });
-      if (url === '/api/orders') return jsonResponse(200, { rows: [], headers: [], roles: {}, notifyStatuses: [] });
-      return jsonResponse(200, []); // DashboardScreen's own contacts/campaigns fetch
-    });
-    render(<App />);
-    expect(await screen.findByRole('heading', { name: 'SMS Dispatch' })).toBeInTheDocument();
-  });
-
-  it('returns to LoginScreen with the expiry message when a later call gets 401', async () => {
-    let callCount = 0;
-    global.fetch.mockImplementation(async () => {
-      callCount += 1;
-      if (callCount === 1) return jsonResponse(200, { mustChangePassword: false, tenantId: 't1', isSuperadmin: false });
-      return jsonResponse(401, { error: 'not authenticated' }); // session died on a later call
-    });
+  it('shows the server error when booking fails', async () => {
+    global.fetch.mockResolvedValue(jsonResponse(400, { error: 'invalid phone: nope' }));
 
     render(<App />);
-    await screen.findByRole('heading', { name: 'SMS Dispatch' }); // reached the dashboard first
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Ada' } });
+    fireEvent.change(screen.getByLabelText('Phone number'), { target: { value: 'nope' } });
+    fireEvent.change(screen.getByLabelText('Date and time'), { target: { value: '2026-08-20T19:30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Book reservation' }));
 
-    expect(await screen.findByText('Session expired, please log in again.')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('invalid phone: nope')).toBeInTheDocument());
   });
 });

@@ -14,6 +14,7 @@ import { createProcessor } from './processor.js';
 import { createDb } from './db.js';
 import { createContactsStore } from './contacts.js';
 import { createCampaignsStore } from './campaigns.js';
+import { createReservationsStore } from './reservations.js';
 import { createCampaignScheduler } from './campaignScheduler.js';
 import { createAuthStore } from './auth.js';
 import { createHttpServer } from './http/server.js';
@@ -50,6 +51,7 @@ function main() {
   const registry = createTenantRegistry({ db, logger });
   const contactsStore = createContactsStore(db, { defaultCountryCode: config.defaultCountryCode });
   const campaignsStore = createCampaignsStore(db);
+  const reservationsStore = createReservationsStore(db);
 
   // Sheet -> contacts sync: always on, for every tenant -- mirrors every
   // scanned row's customer into contacts regardless of notify-status
@@ -68,7 +70,17 @@ function main() {
   const campaignScheduler = createCampaignScheduler({ config, logger, registry, campaignsStore, smsSenderFactory });
 
   const authStore = createAuthStore(db, { sessionTtlHours: config.sessionTtlHours });
-  const httpServer = createHttpServer({ config, logger, authStore, contactsStore, campaignsStore, registry, sheetsClientFactory });
+  const httpServer = createHttpServer({
+    config,
+    logger,
+    authStore,
+    contactsStore,
+    campaignsStore,
+    reservationsStore,
+    registry,
+    smsSenderFactory,
+    sheetsClientFactory,
+  });
 
   // Fail loudly and exit so a supervisor can restart from a clean state.
   process.on('unhandledRejection', (reason) => {

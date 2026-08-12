@@ -44,6 +44,21 @@ CREATE TABLE IF NOT EXISTS campaign_recipients (
   sent_at              TEXT
 );
 
+CREATE TABLE IF NOT EXISTS reservations (
+  id                    TEXT PRIMARY KEY,
+  tenant_id             TEXT NOT NULL,
+  contact_id            TEXT NOT NULL REFERENCES contacts(id),
+  name                  TEXT NOT NULL,
+  phone                 TEXT NOT NULL,
+  party_size            INTEGER NOT NULL,
+  reservation_time      TEXT NOT NULL,
+  notes                 TEXT NOT NULL DEFAULT '',
+  sms_status            TEXT NOT NULL DEFAULT 'pending',
+  sms_error             TEXT,
+  provider_message_id   TEXT,
+  created_at            TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS users (
   id                    TEXT PRIMARY KEY,
   tenant_id             TEXT,
