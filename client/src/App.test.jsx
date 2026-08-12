@@ -11,10 +11,23 @@ beforeEach(() => {
 });
 
 describe('App reservation form', () => {
-  it('renders the public reservation form first', () => {
+  it('renders the public restaurant single page and reservation form', () => {
     render(<App />);
+    expect(screen.getByText("L'Étoile")).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Book a Reservation' }).length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Reserve a table' })).toBeInTheDocument();
     expect(screen.getByRole('form', { name: 'Reservation form' })).toBeInTheDocument();
+  });
+
+  it('scrolls to reservation section when clicking Book a Reservation button', () => {
+    const scrollIntoViewMock = vi.fn();
+    window.HTMLElement.prototype.scrollIntoView = scrollIntoViewMock;
+
+    render(<App />);
+    const ctaButtons = screen.getAllByRole('button', { name: 'Book a Reservation' });
+    fireEvent.click(ctaButtons[0]);
+
+    expect(scrollIntoViewMock).toHaveBeenCalled();
   });
 
   it('posts reservation details and shows the SMS success message', async () => {
@@ -65,3 +78,4 @@ describe('App reservation form', () => {
     await waitFor(() => expect(screen.getByText('invalid phone: nope')).toBeInTheDocument());
   });
 });
+
